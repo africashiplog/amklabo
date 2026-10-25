@@ -1,7 +1,7 @@
 # AMKLABO — Medical & Laboratory
 
 Plateforme e-commerce (détail et gros) de matériel médical et de laboratoire pour la Mauritanie.
-**État : Phase 1 (fondation) terminée.**
+**État : Phases 1 (fondation) et 2 (clients, prix, stock) terminées.**
 
 ## Architecture
 
@@ -28,6 +28,46 @@ src/app/(site)/     site public et espace client     src/app/admin/   administra
 tests/              tests d'intégration (Vitest, base réelle)     e2e/   parcours navigateur
 ```
 
+## Règles métier (Phase 2)
+
+### Tarification (`src/server/services/pricing.ts`)
+Tous les prix sont calculés côté serveur ; un prix venant du navigateur n'est jamais utilisé.
+1. **Prix négocié** d'un client professionnel *approuvé* (valide à la date et pour la quantité) : prioritaire, aucune autre règle ne s'applique.
+2. Sinon, le client paie le **meilleur prix unitaire** parmi : prix public, paliers auxquels il a droit (« tous » ou « professionnels » si approuvé), promotions actives qui le concernent (appliquées au prix public). **Aucun cumul.**
+- Remise en % arrondie à l'unité mineure la plus proche (demi au supérieur), calcul en entiers.
+- Un compte pro en attente, refusé ou suspendu, ou un client suspendu, n'a pas accès aux tarifs de gros.
+- Seul l'administrateur (`pricing.manage`) fixe les prix. Un produit créé par le gestionnaire de stock reste en brouillon, sans prix.
+
+### Stock (`src/server/services/stock.ts`)
+- Stock par lots (numéro et péremption obligatoires si le produit est « suivi par lots »), en unités de vente.
+- Toute variation crée un mouvement **immuable** (droits + déclencheur) avec le solde après opération.
+- `CHECK (qty_on_hand >= 0)` en base : aucune survente possible, même en concurrence (testé avec 6 sorties simultanées).
+- Sorties automatiques en **FEFO** (premier périmé, premier sorti) ; les lots périmés ne sont jamais proposés à la vente.
+- Inventaire : alignement d'un lot sur la quantité comptée (ajustement tracé).
+- Bons d'achat numérotés sans trou (`BA-AAAA-NNNN`) ; la réception (totale ou partielle) crée les lots.
+
+### Clients
+- Archivage et suspension réversibles, avec fermeture des sessions.
+- Suppression définitive : administrateur uniquement, client archivé et **sans historique**.
+- Sinon **anonymisation** : effacement des données personnelles, historique conservé.
+- Notes internes en ajout seul, jamais visibles par le client.
+
+### Matrice des rôles
+| Permission | Admin | Stock | Commandes | Comptable | Livreur |
+|---|:-:|:-:|:-:|:-:|:-:|
+| Catalogue (hors prix) | ✓ | ✓ | | | |
+| Prix, paliers, promotions, prix négociés | ✓ | | | | |
+| Stock, lots, inventaire | ✓ | ✓ | | | |
+| Fournisseurs, bons d'achat | ✓ | ✓ | | | |
+| Coûts d'achat (lecture) | ✓ | ✓ | | ✓ | |
+| Clients (lecture) | ✓ | | ✓ | ✓ | |
+| Clients (modification, notes, statut) | ✓ | | ✓ | | |
+| Approbation des comptes pro | ✓ | | | | |
+| Suppression / anonymisation | ✓ | | | | |
+| Paramètres, utilisateurs, audit | ✓ | | | | |
+
+Le rôle Livreur n'a encore aucun écran (module livraison : Phase 4).
+
 ## Installation
 
 Prérequis : Node.js 22, PostgreSQL 16 (extensions `citext`, `pgcrypto`).
@@ -48,9 +88,9 @@ npm run dev                     # http://localhost:3000
 
 ## Tests
 ```bash
-npm test                        # 40 tests d'intégration sur la base amklabo_test (réinitialisée à chaque lancement)
+npm test                        # 74 tests d'intégration sur la base amklabo_test (réinitialisée à chaque lancement)
 npm run build && <démarrer le serveur sur la base de test, port 3100>
-BASE_URL=http://localhost:3100 ADMIN_EMAIL=… ADMIN_PASSWORD=… npm run test:e2e   # 19 étapes Chromium
+BASE_URL=http://localhost:3100 ADMIN_EMAIL=… ADMIN_PASSWORD=… npm run test:e2e   # 28 étapes Chromium
 ```
 La base `amklabo_test` doit exister (même propriétaire, mêmes extensions).
 
@@ -69,7 +109,7 @@ La base `amklabo_test` doit exister (même propriétaire, mêmes extensions).
 - Le catalogue réel : produits, prix, photos et caractéristiques vérifiées.
 
 ## Feuille de route
-- **Phase 2** : comptes professionnels (demande, approbation), tarifs de gros, paliers, prix par client, promotions ; stock (lots, péremptions, mouvements, fournisseurs, achats) ; gestion complète des clients.
-- **Phase 3** : panier, commandes (réservation de stock transactionnelle), factures PDF, avoirs.
+- ~~Phase 2~~ : comptes professionnels, tarification, stock par lots, fournisseurs et achats, gestion complète des clients.
+- **Phase 3** : panier, commandes (réservation de stock transactionnelle via `allocateFefo`/`applyMovement`, prix figés depuis `quoteLines`), factures PDF, avoirs, historique client.
 - **Phase 4** : paiements (procédure manuelle de vérification Bankily/Masrivi/Sedad/Bimbank/Click/espèces ; API officielles si disponibles), livraisons et livreurs.
 - **Phase 5** : rapports, exports CSV, notifications (e-mail/SMS : fournisseur à choisir), traduction arabe.

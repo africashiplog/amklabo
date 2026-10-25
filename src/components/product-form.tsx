@@ -14,8 +14,8 @@ export type ProductFormValues = {
   specs: { label: string; value: string }[];
 };
 
-export function ProductForm({ action, categories, product }: {
-  action: (s: ActionState, fd: FormData) => Promise<ActionState>; categories: Cat[]; product?: ProductFormValues;
+export function ProductForm({ action, categories, product, canEditPrice = true }: {
+  action: (s: ActionState, fd: FormData) => Promise<ActionState>; categories: Cat[]; product?: ProductFormValues; canEditPrice?: boolean;
 }) {
   const [specs, setSpecs] = useState(product?.specs.length ? product.specs : []);
   const top = categories.filter((c) => !c.parent_id);
@@ -49,14 +49,22 @@ export function ProductForm({ action, categories, product }: {
       <Card className="space-y-4 p-6">
         <h2 className="font-semibold">Vente et prix de détail</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Field name="retailPrice" label="Prix public (MRU)" inputMode="decimal" placeholder="ex. 1250" defaultValue={product?.retailPrice ?? ""} required />
+          {canEditPrice ? (
+            <Field name="retailPrice" label="Prix public (MRU)" inputMode="decimal" placeholder="ex. 1250" defaultValue={product?.retailPrice ?? ""} required />
+          ) : (
+            <div>
+              <input type="hidden" name="retailPrice" value={product?.retailPrice ?? "0"} />
+              <p className="mb-1 text-sm font-medium text-slate-700">Prix public (MRU)</p>
+              <p className="rounded-lg bg-slate-100 px-3 py-2 text-sm">{product && product.retailPrice !== "0" ? product.retailPrice : "À fixer par un administrateur"}</p>
+            </div>
+          )}
           <Field name="saleUnit" label="Unité de vente" as="select" defaultValue={product?.sale_unit ?? "piece"}>
             {Object.entries(t.saleUnit).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </Field>
           <Field name="unitsPerSaleUnit" label="Unités par unité de vente" type="number" min={1} defaultValue={product?.units_per_sale_unit ?? 1} />
           <Field name="minOrderQty" label="Quantité minimale" type="number" min={1} defaultValue={product?.min_order_qty ?? 1} />
         </div>
-        <p className="text-xs text-slate-500">Les tarifs de gros et paliers de quantité seront gérés en Phase 2. Les prix seront toujours recalculés côté serveur lors de la commande.</p>
+        <p className="text-xs text-slate-500">Les paliers de quantité et tarifs de gros se gèrent dans le panneau « Tarifs dégressifs ». Tous les prix sont recalculés côté serveur.</p>
       </Card>
 
       <Card className="space-y-4 p-6">
@@ -65,7 +73,7 @@ export function ProductForm({ action, categories, product }: {
           <Field name="stockAlertThreshold" label="Seuil d'alerte de stock" type="number" min={0} defaultValue={product?.stock_alert_threshold ?? 0} />
           <div className="pt-7"><Checkbox name="trackLots" label="Suivi par lots et dates de péremption" defaultChecked={product?.track_lots} /></div>
         </div>
-        <p className="text-xs text-slate-500">Les entrées, sorties, lots et niveaux de stock seront gérés par le module de stock (Phase 2).</p>
+        <p className="text-xs text-slate-500">Les entrées, sorties et lots se gèrent dans le module Stock.</p>
       </Card>
 
       <Card className="space-y-3 p-6">
@@ -85,7 +93,9 @@ export function ProductForm({ action, categories, product }: {
         <h2 className="font-semibold">Publication</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field name="status" label="Statut" as="select" defaultValue={product?.status ?? "draft"}>
-            {Object.entries(t.productStatus).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            {Object.entries(t.productStatus)
+              .filter(([k]) => canEditPrice || product || k === "draft")
+              .map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </Field>
           <div className="pt-7"><Checkbox name="isFeatured" label="Mettre en avant sur l'accueil" defaultChecked={product?.is_featured} /></div>
         </div>

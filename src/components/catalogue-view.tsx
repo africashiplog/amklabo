@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ProductCard } from "./product-card";
 import { cx, EmptyState, Pagination } from "./ui";
+import { getActor } from "@/server/current";
+import { enrichProducts } from "@/server/services/storefront";
 import { listPublicBrands, listPublicCategories, searchPublicProducts, SORTS, type SortKey } from "@/server/services/catalog";
 
 export type CatalogueParams = { q?: string; categorie?: string; marque?: string; tri?: string; page?: string };
@@ -24,6 +26,7 @@ export async function CatalogueView({ params, basePath, fixedCategory }: {
     listPublicCategories(),
     listPublicBrands(),
   ]);
+  const { prices, stock } = await enrichProducts(await getActor(), result.items);
   const top = categories.filter((c) => !c.parent_id);
   const keep = { q: params.q, marque: params.marque, tri: params.tri, categorie: fixedCategory ? undefined : params.categorie };
 
@@ -96,7 +99,7 @@ export async function CatalogueView({ params, basePath, fixedCategory }: {
           </EmptyState>
         ) : (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
-            {result.items.map((p) => <ProductCard key={p.id} product={p} />)}
+            {result.items.map((p) => <ProductCard key={p.id} product={p} price={prices.get(p.id)} stock={stock.get(p.id)} />)}
           </div>
         )}
         <Pagination page={result.page} pageCount={result.pageCount} params={keep} basePath={basePath} />

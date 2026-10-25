@@ -4,7 +4,8 @@ import { parseMRU } from "@/lib/money";
 import { assertCan, type Actor } from "../actor";
 import { audit } from "../audit";
 import { pgCode, query, queryOne, tx, type Db } from "../db";
-import { UserError } from "../errors";
+import { ForbiddenError, UserError } from "../errors";
+import { can } from "../permissions";
 import { deleteStoredFile, saveImage } from "../storage";
 
 // ---------------------------------------------------------------------------
@@ -422,6 +423,13 @@ function mapProductError(err: unknown): never {
 
 export async function createProduct(actor: Actor | null, input: ProductInput) {
   assertCan(actor, "catalog.manage");
+  if (!can(actor.roles, "pricing.manage")) {
+    // Sans droit de tarification : le produit est créé sans prix, en brouillon.
+    if (input.status !== "draft") {
+      throw new UserError("Le prix doit être fixé par un administrateur avant publication : enregistrez le produit en brouillon.");
+    }
+    input = { ...input, retailPrice: "0" };
+  }
   const d = productSchema.parse(input);
   try {
     return await tx(async (db) => {
@@ -451,6 +459,9 @@ export async function updateProduct(actor: Actor | null, id: string, input: Prod
     return await tx(async (db) => {
       const before = await queryOne<ProductRow>("SELECT * FROM products WHERE id = $1 FOR UPDATE", [id], db);
       if (!before) throw new UserError("Produit introuvable.");
+      if (before.retail_price_minor !== d.retailPrice && !can(actor.roles, "pricing.manage")) {
+        throw new ForbiddenError("Seul un administrateur peut modifier le prix de vente.");
+      }
       const slug = before.name === d.name ? before.slug : await uniqueSlug("products", slugify(d.name), id, db);
       await db.query(
         `UPDATE products SET name=$1, sku=$2, barcode=$3, description=$4, category_id=$5, brand=$6, manufacturer=$7,
@@ -548,4 +559,12 @@ export async function makeCoverImage(actor: Actor | null, imageId: string) {
       await db.query("UPDATE product_images SET sort_order = $2 WHERE id = $1", [ordered[i], i]);
     }
   });
+}
+
+/** Liste compacte des produits pour les formulaires d'administration. */
+export async function listProductOptions(actor: Actor | null) {
+  assertCan(actor, "admin.access");
+  return query<{ id: string; name: string; sku: string; status: string }>(
+    "SELECT id, name, sku, status FROM products WHERE status <> 'archived' ORDER BY name",
+  );
 }

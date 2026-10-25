@@ -1,13 +1,28 @@
 "use client";
 
-import { createContext, useActionState, useContext, useEffect, useId, useRef, type ReactNode } from "react";
+import { createContext, startTransition, useActionState, useContext, useEffect, useId, useRef, type FormEvent, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import type { ActionState } from "@/server/action";
 import { Alert, Button, cx, Input, Label, Select, Textarea, type Variant } from "./ui";
 
 const FormStateContext = createContext<ActionState>({});
+const PendingContext = createContext<boolean | null>(null);
 
 type ServerAction = (prev: ActionState, fd: FormData) => Promise<ActionState>;
+
+/**
+ * React 19 vide automatiquement un formulaire après chaque envoi, y compris en
+ * cas d'erreur, ce qui ferait perdre la saisie. On envoie donc les données
+ * nous-mêmes (sans réinitialisation) ; sans JavaScript, l'attribut action
+ * natif reste utilisé.
+ */
+function useKeepValuesSubmit(formAction: (fd: FormData) => void) {
+  return (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget, (e.nativeEvent as SubmitEvent).submitter);
+    startTransition(() => formAction(fd));
+  };
+}
 
 /**
  * Formulaire relié à une action serveur : affiche le message global et
@@ -16,19 +31,22 @@ type ServerAction = (prev: ActionState, fd: FormData) => Promise<ActionState>;
 export function ActionForm({ action, children, className, resetOnSuccess, showSuccess = true }: {
   action: ServerAction; children: ReactNode; className?: string; resetOnSuccess?: boolean; showSuccess?: boolean;
 }) {
-  const [state, formAction] = useActionState(action, {});
+  const [state, formAction, pending] = useActionState(action, {});
   const ref = useRef<HTMLFormElement>(null);
+  const onSubmit = useKeepValuesSubmit(formAction);
   useEffect(() => {
     if (state.ok && resetOnSuccess) ref.current?.reset();
   }, [state, resetOnSuccess]);
   return (
     <FormStateContext.Provider value={state}>
-      <form ref={ref} action={formAction} className={cx("space-y-4", className)} noValidate>
+     <PendingContext.Provider value={pending}>
+      <form ref={ref} action={formAction} onSubmit={onSubmit} className={cx("space-y-4", className)} noValidate>
         {state.message && (state.ok === false || showSuccess) && (
           <Alert tone={state.ok ? "success" : "error"}>{state.message}</Alert>
         )}
         {children}
       </form>
+     </PendingContext.Provider>
     </FormStateContext.Provider>
   );
 }
@@ -76,7 +94,9 @@ export function Checkbox({ name, label, defaultChecked, value = "on" }: { name: 
 export function SubmitButton({ children, variant = "primary", size, className, pendingLabel = "Enregistrement…" }: {
   children: ReactNode; variant?: Variant; size?: "sm" | "md"; className?: string; pendingLabel?: string;
 }) {
-  const { pending } = useFormStatus();
+  const status = useFormStatus();
+  const ctxPending = useContext(PendingContext);
+  const pending = ctxPending ?? status.pending;
   return (
     <Button type="submit" variant={variant} size={size} disabled={pending} className={className} aria-busy={pending}>
       {pending ? pendingLabel : children}
@@ -88,12 +108,13 @@ export function SubmitButton({ children, variant = "primary", size, className, p
  * Bouton d'action destructrice ou sensible : ouvre une fenêtre de
  * confirmation décrivant précisément l'élément concerné et les conséquences.
  */
-export function ConfirmAction({ action, fields, label, title, description, confirmLabel = "Confirmer", variant = "danger", size = "sm" }: {
+export function ConfirmAction({ action, fields, label, title, description, confirmLabel = "Confirmer", variant = "danger", size = "sm", children }: {
   action: ServerAction; fields: Record<string, string>; label: string; title: string; description: ReactNode;
-  confirmLabel?: string; variant?: Variant; size?: "sm" | "md";
+  confirmLabel?: string; variant?: Variant; size?: "sm" | "md"; children?: ReactNode;
 }) {
-  const [state, formAction] = useActionState(action, {});
+  const [state, formAction, pending] = useActionState(action, {});
   const dialog = useRef<HTMLDialogElement>(null);
+  const onSubmit = useKeepValuesSubmit(formAction);
   useEffect(() => {
     if (state.ok) dialog.current?.close();
   }, [state]);
@@ -104,20 +125,21 @@ export function ConfirmAction({ action, fields, label, title, description, confi
         onClick={() => dialog.current?.showModal()}>
         {label}
       </Button>
-      {state.ok === false && state.message && !dialog.current?.open && (
-        <p role="alert" className="mt-1 text-xs text-red-700">{state.message}</p>
-      )}
+      {state.ok && state.message && <p role="status" className="mt-1 text-xs text-leaf-700">{state.message}</p>}
       <dialog ref={dialog} className="w-[min(32rem,calc(100vw-2rem))] rounded-xl p-0 shadow-xl backdrop:bg-slate-900/40">
-        <form action={formAction} className="space-y-4 p-6">
+        <PendingContext.Provider value={pending}>
+        <form action={formAction} onSubmit={onSubmit} className="space-y-4 p-6">
           {Object.entries(fields).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
           <div className="text-sm text-slate-600">{description}</div>
+          {children && <FormStateContext.Provider value={state}>{children}</FormStateContext.Provider>}
           {state.ok === false && state.message && <Alert tone="error">{state.message}</Alert>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={() => dialog.current?.close()}>Annuler</Button>
             <SubmitButton variant={variant} pendingLabel="Traitement…">{confirmLabel}</SubmitButton>
           </div>
         </form>
+        </PendingContext.Provider>
       </dialog>
     </>
   );

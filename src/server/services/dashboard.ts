@@ -8,6 +8,7 @@ export async function getDashboardStats(actor: Actor | null) {
     products_total: number; products_published: number; products_draft: number; products_unavailable: number;
     products_archived: number; products_without_image: number; categories_active: number; categories_total: number;
     customers_total: number; customers_30d: number; messages_open: number; zones_active: number;
+    business_pending: number; business_approved: number; purchases_open: number;
   }>(`SELECT
       (SELECT count(*)::int FROM products) AS products_total,
       (SELECT count(*)::int FROM products WHERE status = 'published') AS products_published,
@@ -21,7 +22,10 @@ export async function getDashboardStats(actor: Actor | null) {
       (SELECT count(*)::int FROM customers) AS customers_total,
       (SELECT count(*)::int FROM customers WHERE created_at > now() - interval '30 days') AS customers_30d,
       (SELECT count(*)::int FROM contact_messages WHERE handled_at IS NULL) AS messages_open,
-      (SELECT count(*)::int FROM delivery_zones WHERE is_active) AS zones_active`);
+      (SELECT count(*)::int FROM delivery_zones WHERE is_active) AS zones_active,
+      (SELECT count(*)::int FROM business_accounts WHERE status = 'pending') AS business_pending,
+      (SELECT count(*)::int FROM business_accounts WHERE status = 'approved') AS business_approved,
+      (SELECT count(*)::int FROM purchase_orders WHERE status IN ('ordered', 'partially_received')) AS purchases_open`);
 
   const recentCustomers = await query<{ id: string; full_name: string; customer_type: string; created_at: Date }>(
     "SELECT id, full_name, customer_type, created_at FROM customers ORDER BY created_at DESC LIMIT 5",

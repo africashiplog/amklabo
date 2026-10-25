@@ -37,6 +37,10 @@ export default async function AdminSettings() {
             <Field name="bankDetails" label="Coordonnées bancaires / de paiement" as="textarea" rows={3} defaultValue={s.bank_details ?? ""} />
             <Field name="invoiceFooter" label="Mention de pied de facture" as="textarea" rows={2} defaultValue={s.invoice_footer ?? ""} />
           </Card>
+          <Card className="space-y-4 p-6">
+            <h2 className="font-semibold">Stock</h2>
+            <Field name="expiryAlertDays" label="Alerte de péremption (jours avant la date)" type="number" min={1} max={730} defaultValue={s.expiry_alert_days} className="max-w-xs" />
+          </Card>
           <div><SubmitButton>Enregistrer les paramètres</SubmitButton></div>
         </ActionForm>
 

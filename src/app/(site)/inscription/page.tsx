@@ -14,7 +14,7 @@ export default async function RegisterPage() {
     <div className="mx-auto max-w-lg px-4 py-12">
       <Card className="p-6 sm:p-8">
         <h1 className="text-2xl font-bold text-slate-900">Créer un compte</h1>
-        <p className="mt-1 text-sm text-slate-600">Compte client particulier. Les comptes professionnels seront ouverts prochainement.</p>
+        <p className="mt-1 text-sm text-slate-600">Compte client. Professionnel de santé ? Créez votre compte, puis déposez une demande dans l'Espace pro.</p>
         <ActionForm action={registerAction} className="mt-6">
           <Field name="fullName" label="Nom complet" autoComplete="name" required />
           <div className="grid gap-4 sm:grid-cols-2">

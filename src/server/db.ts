@@ -3,6 +3,8 @@ import { Pool, types, type PoolClient, type QueryResultRow } from "pg";
 // BIGINT (montants en unités mineures, compteurs) → number. Les montants restent
 // très en dessous de Number.MAX_SAFE_INTEGER (≈ 9·10^15).
 types.setTypeParser(20, (v) => Number(v));
+// DATE → chaîne "AAAA-MM-JJ" (pas de conversion de fuseau horaire).
+types.setTypeParser(1082, (v) => v);
 
 declare global {
   // eslint-disable-next-line no-var

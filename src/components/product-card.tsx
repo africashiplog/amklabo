@@ -2,6 +2,7 @@ import Link from "next/link";
 import { formatMRU } from "@/lib/money";
 import { t } from "@/i18n/fr";
 import type { ProductRow } from "@/server/services/catalog";
+import type { PriceQuote } from "@/server/services/pricing";
 import { mediaUrl } from "@/server/storage";
 import { Badge } from "./ui";
 
@@ -21,7 +22,9 @@ export function unitLabel(p: Pick<ProductRow, "sale_unit" | "units_per_sale_unit
   return p.units_per_sale_unit > 1 ? `${unit} de ${p.units_per_sale_unit}` : unit;
 }
 
-export function ProductCard({ product }: { product: ProductRow }) {
+export function ProductCard({ product, price, stock }: { product: ProductRow; price?: PriceQuote; stock?: number }) {
+  const unit = price?.unitPriceMinor ?? product.retail_price_minor;
+  const discounted = unit < product.retail_price_minor;
   return (
     <Link href={`/produits/${product.slug}`}
       className="group flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:border-brand-200 hover:shadow-md">
@@ -40,10 +43,12 @@ export function ProductCard({ product }: { product: ProductRow }) {
         {product.brand && <p className="text-xs text-slate-500">{product.brand}</p>}
         <div className="mt-auto flex items-end justify-between gap-2 pt-3">
           <p>
-            <span className="text-lg font-bold text-brand-800">{formatMRU(product.retail_price_minor)}</span>
+            {discounted && <span className="block text-xs text-slate-400 line-through">{formatMRU(product.retail_price_minor)}</span>}
+            <span className={`text-lg font-bold ${discounted ? "text-leaf-700" : "text-brand-800"}`}>{formatMRU(unit)}</span>
             <span className="ms-1 text-xs text-slate-500">/ {unitLabel(product)}</span>
           </p>
-          {product.status === "unavailable" && <Badge tone="amber">Indisponible</Badge>}
+          {product.status === "unavailable" ? <Badge tone="amber">Indisponible</Badge>
+            : stock !== undefined && (stock > 0 ? <Badge tone="green">En stock</Badge> : <Badge>Rupture</Badge>)}
         </div>
       </div>
     </Link>

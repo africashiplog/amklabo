@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { formOptional, formString, runAction, type ActionState } from "@/server/action";
 import { clientIp, getActor } from "@/server/current";
+import { submitBusinessRequest } from "@/server/services/business";
 import { submitContactMessage } from "@/server/services/contact";
 import {
   changeMyPassword, deleteMyAddress, saveMyAddress, updateMyProfile,
@@ -70,4 +71,17 @@ export async function deleteAddressAction(_: ActionState, fd: FormData): Promise
     revalidatePath("/compte");
     return "Adresse supprimée.";
   });
+}
+
+export async function businessRequestAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const state = await runAction(async () => {
+    await submitBusinessRequest(await getActor(), {
+      establishmentName: formString(fd, "establishmentName"), activity: formString(fd, "activity") as "other",
+      contactName: formString(fd, "contactName"), phone: formString(fd, "phone"), email: formString(fd, "email"),
+      addressLine: formString(fd, "addressLine"), city: formString(fd, "city"), professionalId: formString(fd, "professionalId"),
+      message: formString(fd, "message"),
+    });
+  });
+  if (state.ok) redirect("/espace-pro?envoye=1");
+  return state;
 }

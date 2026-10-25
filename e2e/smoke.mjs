@@ -104,7 +104,7 @@ await step("Connexion administrateur et tableau de bord", async () => {
   await login(ap, ADMIN.email, ADMIN.password);
   await ap.goto(`${BASE}/admin`);
   await ap.getByRole("heading", { name: "Tableau de bord" }).waitFor();
-  await ap.getByText("Produits publiés").waitFor();
+  await ap.getByText("Produits publiés", { exact: true }).waitFor();
 });
 
 await step("Création d'une catégorie", async () => {
@@ -177,6 +177,152 @@ await step("Suppression confirmée d'un produit archivé", async () => {
   await ap.waitForURL(/\/admin\/produits\?supprime=1/);
 });
 
+// ---------------------------------------------------------------- Phase 2
+const proSku = `PRO-${id}`.toUpperCase();
+const proName = `Gants nitrile E2E ${id}`;
+let proProductUrl = "";
+
+await step("Demande de compte professionnel par le client", async () => {
+  await page.goto(`${BASE}/espace-pro`);
+  await page.getByLabel("Nom de l'établissement").fill(`Laboratoire E2E ${id}`);
+  await page.getByLabel("Activité").selectOption("laboratory");
+  await page.getByLabel("Adresse", { exact: true }).fill("Avenue E2E");
+  await page.getByRole("button", { name: "Envoyer la demande" }).click();
+  await page.waitForURL(/envoye=1/);
+  await page.getByText("En attente d'examen").waitFor();
+});
+
+await step("Produit avec palier professionnel (admin)", async () => {
+  await ap.goto(`${BASE}/admin/produits/nouveau`);
+  await ap.getByLabel("Nom du produit").fill(proName);
+  await ap.getByLabel("Référence (SKU)").fill(proSku);
+  await ap.getByLabel("Catégorie").selectOption({ index: 2 });
+  await ap.getByLabel("Prix public (MRU)").fill("1000");
+  await ap.getByLabel("Statut").selectOption("published");
+  await ap.getByRole("button", { name: "Créer le produit" }).click();
+  await ap.waitForURL(/\/admin\/produits\/[0-9a-f-]+\?cree=1/);
+  await ap.getByLabel("Pour").selectOption("business");
+  await ap.getByLabel("Dès (qté)").fill("10");
+  await ap.getByLabel("Prix unitaire").fill("900");
+  await ap.getByRole("button", { name: "Ajouter le palier" }).click();
+  await ap.getByText("Palier ajouté.").waitFor();
+});
+
+await step("Avant approbation : le client ne voit pas le tarif professionnel", async () => {
+  await page.goto(`${BASE}/catalogue?q=${proSku}`);
+  await page.getByRole("link", { name: new RegExp(proName) }).click();
+  await page.waitForURL(/\/produits\//);
+  proProductUrl = page.url().split("?")[0];
+  await page.goto(`${proProductUrl}?qte=10`);
+  const text = await page.locator("main").innerText();
+  assert.match(text, /1 000 MRU/);
+  assert.doesNotMatch(text, /900 MRU/);
+  assert.doesNotMatch(text, /Tarif professionnel/);
+  await page.getByText("Rupture de stock").waitFor();
+});
+
+await step("Approbation du compte professionnel (admin)", async () => {
+  await ap.goto(`${BASE}/admin/professionnels`);
+  const card = ap.locator("li", { hasText: `Laboratoire E2E ${id}` });
+  await card.getByRole("button", { name: "Approuver" }).click();
+  await ap.getByRole("dialog").getByRole("button", { name: "Approuver" }).click();
+  // La demande quitte la liste « En attente » ; elle apparaît dans « Approuvés ».
+  await card.waitFor({ state: "detached" });
+  await ap.goto(`${BASE}/admin/professionnels?statut=approved`);
+  await ap.locator("li", { hasText: `Laboratoire E2E ${id}` }).getByText("Approuvé").waitFor();
+});
+
+await step("Après approbation : tarif professionnel appliqué selon la quantité", async () => {
+  await page.goto(`${proProductUrl}?qte=9`);
+  assert.match(await page.locator("main").innerText(), /1 000 MRU/);
+  await page.goto(`${proProductUrl}?qte=10`);
+  const text = await page.locator("main").innerText();
+  assert.match(text, /Tarif professionnel dès 10/);
+  assert.match(text, /Total : 9 000 MRU/);
+});
+
+await step("Fournisseur, bon d'achat, validation et réception partielle", async () => {
+  await ap.goto(`${BASE}/admin/fournisseurs`);
+  await ap.getByLabel("Nom", { exact: true }).fill(`Fournisseur E2E ${id}`);
+  await ap.getByRole("button", { name: "Ajouter le fournisseur" }).click();
+  await ap.waitForURL(/\/admin\/fournisseurs\/[0-9a-f-]+/);
+  await ap.goto(`${BASE}/admin/achats`);
+  await ap.getByLabel("Fournisseur").selectOption({ label: `Fournisseur E2E ${id}` });
+  await ap.getByRole("button", { name: "Créer le brouillon" }).click();
+  await ap.waitForURL(/\/admin\/achats\/[0-9a-f-]+/);
+  await ap.getByLabel("Produit").selectOption({ label: `${proName} (${proSku})` });
+  await ap.getByLabel("Quantité (unités de vente)").fill("50");
+  await ap.getByLabel("Coût unitaire (MRU)").fill("600");
+  await ap.getByRole("button", { name: "Ajouter / mettre à jour la ligne" }).click();
+  await ap.getByText("Ligne enregistrée.").waitFor();
+  await ap.getByRole("button", { name: "Valider la commande" }).click();
+  await ap.getByRole("dialog").getByRole("button", { name: "Valider" }).click();
+  await ap.getByText("Commandé", { exact: true }).first().waitFor();
+  await ap.getByLabel(/Quantité reçue/).fill("30");
+  await ap.getByLabel(/N° de lot/).fill("LOT-E2E");
+  await ap.getByLabel(/Péremption/).fill("2030-12-31");
+  await ap.getByRole("button", { name: "Enregistrer la réception" }).click();
+  await ap.getByText("Réception enregistrée").waitFor();
+  await ap.getByText("Reçu partiellement").first().waitFor();
+});
+
+await step("Stock : 30 disponibles, sortie excessive refusée, produit « En stock »", async () => {
+  await ap.goto(`${BASE}/admin/stock?q=${proSku}`);
+  await ap.getByRole("link", { name: proName }).click();
+  await ap.waitForURL(/\/admin\/stock\/[0-9a-f-]+/);
+  await ap.getByText("LOT-E2E").first().waitFor();
+  const exit = ap.locator("form", { hasText: "Enregistrer la sortie" });
+  await exit.getByLabel("Quantité").fill("31");
+  await exit.getByLabel("Motif").fill("Test dépassement");
+  await exit.getByRole("button", { name: "Enregistrer la sortie" }).click();
+  await ap.getByText(/Stock insuffisant/).waitFor();
+  assert.equal(await exit.getByLabel("Motif").inputValue(), "Test dépassement", "la saisie doit être conservée après une erreur");
+  await exit.getByLabel("Quantité").fill("2");
+  await exit.getByRole("button", { name: "Enregistrer la sortie" }).click();
+  await ap.getByText("Sortie de stock enregistrée.").waitFor();
+  await ap.getByText("Réception BA-").first().waitFor();
+  await page.goto(proProductUrl);
+  await page.getByText("En stock", { exact: true }).waitFor();
+});
+
+await step("Fiche client : note interne et prix négocié appliqué au client", async () => {
+  await ap.goto(`${BASE}/admin/clients?q=${encodeURIComponent(customer.email)}`);
+  await ap.getByRole("link", { name: "Client E2E" }).click();
+  await ap.waitForURL(/\/admin\/clients\/[0-9a-f-]+/);
+  await ap.getByLabel("Nouvelle note").fill("Client test E2E : livraison le matin.");
+  await ap.getByRole("button", { name: "Ajouter" }).click();
+  await ap.getByText("Client test E2E : livraison le matin.").waitFor();
+  const priceForm = ap.locator("form", { hasText: "Enregistrer le prix" });
+  await priceForm.getByLabel("Produit").selectOption({ label: `${proName} (${proSku})` });
+  await priceForm.getByLabel("Prix unitaire (MRU)").fill("850");
+  await priceForm.getByRole("button", { name: "Enregistrer le prix" }).click();
+  await ap.getByText("Prix négocié enregistré.").waitFor();
+  await page.goto(`${proProductUrl}?qte=10`);
+  const text = await page.locator("main").innerText();
+  assert.match(text, /Prix négocié/);
+  assert.match(text, /Total : 8 500 MRU/);
+});
+
+await step("Promotion particuliers : appliquée aux visiteurs, pas au professionnel", async () => {
+  const today = new Date().toISOString().slice(0, 10);
+  await ap.goto(`${BASE}/admin/promotions`);
+  const form = ap.locator("form", { hasText: "Créer la promotion" });
+  await form.getByLabel("Nom de la promotion").fill(`Promo E2E ${id}`);
+  await form.getByLabel("Clients concernés").selectOption("retail");
+  await form.getByLabel(/^Produit/).selectOption({ label: `${proName} (${proSku})` });
+  await form.getByLabel("Valeur").fill("10");
+  await form.getByLabel("Du", { exact: true }).fill(today);
+  await form.getByLabel("Au (inclus)").fill(today);
+  await form.getByRole("button", { name: "Créer la promotion" }).click();
+  await ap.getByText("Promotion enregistrée.").waitFor();
+  const anon = await browser.newPage();
+  await anon.goto(proProductUrl);
+  const text = await anon.locator("main").innerText();
+  assert.match(text, /900 MRU/);
+  assert.match(text, new RegExp(`Promo E2E ${id}`));
+  await anon.close();
+});
+
 await step("Formulaire de contact enregistré et visible en administration", async () => {
   await page.goto(`${BASE}/contact?sujet=Demande%20E2E%20${id}`);
   await page.getByLabel("Message").fill("Bonjour, je souhaite un devis pour 500 boîtes.");
@@ -203,7 +349,7 @@ await step("Journal d'audit : changements tracés", async () => {
 
 await step("Responsive : pas de défilement horizontal (375 / 768 / 1280 px)", async () => {
   for (const [w, h] of [[375, 812], [768, 1024], [1280, 900]]) {
-    for (const [name, p, url] of [["accueil", page, "/"], ["catalogue", page, "/catalogue"], ["admin", ap, "/admin/produits"]]) {
+    for (const [name, p, url] of [["accueil", page, "/"], ["catalogue", page, "/catalogue"], ["admin", ap, "/admin/produits"], ["stock", ap, "/admin/stock"], ["pro", page, "/espace-pro"]]) {
       await p.setViewportSize({ width: w, height: h });
       await p.goto(BASE + url);
       const overflow = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ProductCard } from "@/components/product-card";
 import { LinkButton } from "@/components/ui";
 import { formatMRU } from "@/lib/money";
+import { getActor } from "@/server/current";
+import { enrichProducts } from "@/server/services/storefront";
 import { listFeaturedProducts, listNewestProducts, listPublicCategories } from "@/server/services/catalog";
 import { getStoreSettings } from "@/server/services/settings";
 import { listActiveZones } from "@/server/services/zones";
@@ -10,6 +12,7 @@ export default async function HomePage() {
   const [categories, featured, newest, zones, settings] = await Promise.all([
     listPublicCategories(), listFeaturedProducts(8), listNewestProducts(8), listActiveZones(), getStoreSettings(),
   ]);
+  const { prices, stock } = await enrichProducts(await getActor(), [...featured, ...newest]);
   const topCategories = categories.filter((c) => !c.parent_id);
 
   return (
@@ -32,7 +35,7 @@ export default async function HomePage() {
           </form>
           <div className="mt-6 flex flex-wrap gap-3 text-sm">
             <Link href="/catalogue" className="rounded-full bg-white/10 px-4 py-2 font-medium ring-1 ring-white/30 hover:bg-white/20">Voir tout le catalogue</Link>
-            <Link href="#professionnels" className="rounded-full bg-white/10 px-4 py-2 font-medium ring-1 ring-white/30 hover:bg-white/20">Espace professionnels</Link>
+            <Link href="/espace-pro" className="rounded-full bg-white/10 px-4 py-2 font-medium ring-1 ring-white/30 hover:bg-white/20">Espace professionnels</Link>
           </div>
         </div>
       </section>
@@ -58,7 +61,7 @@ export default async function HomePage() {
         <section className="mx-auto max-w-7xl px-4 py-6">
           <h2 className="mb-6 text-2xl font-bold text-slate-900">Produits mis en avant</h2>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-            {featured.map((p) => <ProductCard key={p.id} product={p} />)}
+            {featured.map((p) => <ProductCard key={p.id} product={p} price={prices.get(p.id)} stock={stock.get(p.id)} />)}
           </div>
         </section>
       )}
@@ -70,7 +73,7 @@ export default async function HomePage() {
         </div>
         {newest.length > 0 ? (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-            {newest.map((p) => <ProductCard key={p.id} product={p} />)}
+            {newest.map((p) => <ProductCard key={p.id} product={p} price={prices.get(p.id)} stock={stock.get(p.id)} />)}
           </div>
         ) : (
           <p className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-slate-600">
@@ -88,10 +91,9 @@ export default async function HomePage() {
               et des paliers par quantité seront proposés aux comptes professionnels validés.
             </p>
             <p className="mt-3 text-sm text-leaf-50">
-              L&apos;ouverture des comptes professionnels en ligne est en préparation. En attendant, contactez-nous
-              pour vos besoins en volume.
+              Déposez votre demande de compte professionnel : notre équipe l&apos;examine et active vos tarifs.
             </p>
-            <LinkButton href="/contact?sujet=Demande%20professionnelle" variant="secondary" className="mt-4">Nous contacter</LinkButton>
+            <LinkButton href="/espace-pro" variant="secondary" className="mt-4">Demander un compte professionnel</LinkButton>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-6">
             <h2 className="text-lg font-bold text-slate-900">Livraison</h2>

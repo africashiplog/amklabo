@@ -7,6 +7,7 @@ import { t } from "@/i18n/fr";
 import { formatDate } from "@/lib/format";
 import { requireActorPage } from "@/server/current";
 import { can } from "@/server/permissions";
+import { BUSINESS_STATUS, getMyBusinessAccount } from "@/server/services/business";
 import { getMyProfile, listMyAddresses } from "@/server/services/customer-account";
 import { listActiveZones } from "@/server/services/zones";
 import { logoutAction } from "../../actions/auth";
@@ -19,6 +20,8 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
   const { bienvenue } = await searchParams;
   const [profile, addresses, zones] = await Promise.all([getMyProfile(actor), listMyAddresses(actor), listActiveZones()]);
   const isStaff = can(actor.roles, "admin.access");
+  const business = profile?.customer_type ? await getMyBusinessAccount(actor) : null;
+  const proLabel = business ? BUSINESS_STATUS[business.status] : "faire une demande pour accéder aux tarifs de gros";
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10">
@@ -36,6 +39,13 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         </div>
       </div>
       {bienvenue && <div className="mt-4"><Alert tone="success">Bienvenue ! Votre compte a été créé.</Alert></div>}
+      {profile?.customer_type && (
+        <div className="mt-4">
+          <Link href="/espace-pro" className="flex items-center justify-between rounded-xl border border-leaf-500/30 bg-leaf-50 px-4 py-3 text-sm text-leaf-700 hover:bg-leaf-100">
+            <span><strong>Compte professionnel</strong> — {proLabel}</span><span aria-hidden>→</span>
+          </Link>
+        </div>
+      )}
       <div className="mt-4"><Alert tone="info">
         Le suivi des commandes, des factures et des paiements sera disponible dans votre espace dès l&apos;ouverture de la commande en ligne.
       </Alert></div>

@@ -6,6 +6,7 @@ import { formatDateTime } from "@/lib/format";
 import { requireActorPage } from "@/server/current";
 import { can } from "@/server/permissions";
 import { getDashboardStats } from "@/server/services/dashboard";
+import { getStockAlertCounts } from "@/server/services/stock";
 
 function Stat({ label, value, href, tone = "blue", sub }: { label: string; value: number; href?: string; tone?: "blue" | "green" | "amber"; sub?: string }) {
   const color = { blue: "text-brand-800", green: "text-leaf-700", amber: "text-amber-700" }[tone];
@@ -21,8 +22,8 @@ function Stat({ label, value, href, tone = "blue", sub }: { label: string; value
 
 const UPCOMING = [
   ["Chiffre d'affaires et commandes", "Phase 3 — commandes"],
-  ["Ventes en gros / au détail", "Phase 2–3 — comptes professionnels et commandes"],
-  ["Stock, ruptures et péremptions", "Phase 2 — lots et mouvements de stock"],
+  ["Ventes en gros / au détail", "Phase 3 — commandes"],
+  ["Stock réservé par les commandes", "Phase 3 — commandes"],
   ["Paiements à vérifier", "Phase 4 — paiements"],
   ["Factures impayées", "Phase 3 — factures"],
 ] as const;
@@ -30,7 +31,8 @@ const UPCOMING = [
 export default async function AdminDashboard() {
   const actor = await requireActorPage("/admin");
   if (!can(actor.roles, "dashboard.view")) redirect("/acces-refuse");
-  const { counts: c, recentCustomers, recentActivity } = await getDashboardStats(actor);
+  const [{ counts: c, recentCustomers, recentActivity }, stock] = await Promise.all([getDashboardStats(actor), getStockAlertCounts(actor)]);
+  const stockLink = can(actor.roles, "stock.manage");
 
   return (
     <>
@@ -44,6 +46,17 @@ export default async function AdminDashboard() {
         <Stat label="Clients" value={c.customers_total} href="/admin/clients" sub={`${c.customers_30d} sur 30 jours`} tone="green" />
         <Stat label="Messages à traiter" value={c.messages_open} href="/admin/messages" tone={c.messages_open ? "amber" : "blue"} />
         <Stat label="Zones de livraison actives" value={c.zones_active} href="/admin/livraison" />
+      </div>
+
+      <h2 className="mb-3 mt-8 font-semibold text-slate-900">Stock et approvisionnement</h2>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Stat label="Produits en rupture" value={stock.out_of_stock} href={stockLink ? "/admin/stock?filtre=out" : undefined} tone={stock.out_of_stock ? "amber" : "green"} sub="produits publiés" />
+        <Stat label="Stock bas" value={stock.low_stock} href={stockLink ? "/admin/stock?filtre=low" : undefined} tone={stock.low_stock ? "amber" : "green"} sub="sous le seuil d'alerte" />
+        <Stat label="Lots proches de la péremption" value={stock.expiring_lots} href={stockLink ? "/admin/stock/peremptions" : undefined} tone={stock.expiring_lots ? "amber" : "green"} />
+        <Stat label="Lots périmés en stock" value={stock.expired_lots} href={stockLink ? "/admin/stock/peremptions" : undefined} tone={stock.expired_lots ? "amber" : "green"} />
+        <Stat label="Bons d'achat en attente" value={c.purchases_open} href={can(actor.roles, "suppliers.manage") ? "/admin/achats?statut=ordered" : undefined} />
+        <Stat label="Demandes pro à examiner" value={c.business_pending} href="/admin/professionnels" tone={c.business_pending ? "amber" : "blue"} />
+        <Stat label="Comptes pro approuvés" value={c.business_approved} href="/admin/professionnels?statut=approved" tone="green" />
       </div>
 
       <div className="mt-8 grid gap-6 lg:grid-cols-2">

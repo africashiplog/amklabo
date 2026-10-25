@@ -140,6 +140,7 @@ export async function saveSettingsAction(_: ActionState, fd: FormData): Promise<
       city: formString(fd, "city"), openingHours: formString(fd, "openingHours"), legalName: formString(fd, "legalName"),
       taxId: formString(fd, "taxId"), tradeRegister: formString(fd, "tradeRegister"),
       bankDetails: formString(fd, "bankDetails"), invoiceFooter: formString(fd, "invoiceFooter"),
+      expiryAlertDays: formString(fd, "expiryAlertDays") || "90",
     });
     refreshSite();
     return "Paramètres enregistrés.";
