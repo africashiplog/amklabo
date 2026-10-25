@@ -31,6 +31,8 @@ const ctx = await browser.newContext();
 const page = await ctx.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
+const watchConsole = (p) => p.on("console", (m) => { if (m.type() === "error" && /Content Security Policy|Refused to/.test(m.text())) errors.push(`CSP: ${m.text()}`); });
+watchConsole(page);
 
 async function login(p, email, password) {
   await p.goto(`${BASE}/connexion`);
@@ -98,6 +100,7 @@ await step("Un client n'a pas accès à l'administration", async () => {
 const admin = await browser.newContext();
 const ap = await admin.newPage();
 ap.on("pageerror", (e) => errors.push(e.message));
+watchConsole(ap);
 const sku = `E2E-${id}`.toUpperCase();
 
 await step("Connexion administrateur et tableau de bord", async () => {
@@ -596,10 +599,41 @@ await step("Refus motivé du paiement, communiqué au client", async () => {
   await item.getByRole("button", { name: "Refuser" }).click();
   await ap.getByRole("dialog").getByLabel(/Motif/).fill("Transaction introuvable sur le compte");
   await ap.getByRole("dialog").getByRole("button", { name: "Refuser" }).click();
-  await ap.getByText("Refusé", { exact: true }).first().waitFor();
+  // Le paiement traité quitte la liste « en attente de vérification ».
+  await ap.locator("div.rounded-lg", { hasText: bankilyOrder }).first().waitFor({ state: "detached" });
   await page.goto(`${BASE}/compte/commandes/${bankilyOrder}`);
   await page.getByText("Transaction introuvable sur le compte").waitFor();
   await page.getByLabel("Numéro de transaction").waitFor(); // le client peut transmettre une nouvelle référence
+});
+
+// ---------------------------------------------------------------- Phase 5
+await step("Rapports : ventes avec graphique et tableau, export CSV", async () => {
+  await ap.goto(`${BASE}/admin/rapports`);
+  await ap.getByRole("img", { name: /Ventes TTC par période/ }).waitFor();
+  await ap.getByText("dont professionnels").waitFor();
+  const res = await ap.request.get(`${BASE}/admin/rapports/export?type=ventes`);
+  assert.equal(res.status(), 200);
+  assert.match(res.headers()["content-type"], /text\/csv/);
+  const csv = (await res.body()).toString("utf8");
+  assert.ok(csv.startsWith("﻿Période;Commandes;Ventes (MRU)"), csv.slice(0, 60));
+  for (const v of ["produits", "categories", "stock", "annulations", "paiements", "impayes"]) {
+    await ap.goto(`${BASE}/admin/rapports?vue=${v}`);
+    await ap.getByRole("link", { name: /Exporter/ }).first().waitFor();
+  }
+});
+
+await step("Exports refusés aux rôles non autorisés et aux visiteurs", async () => {
+  assert.equal((await dctx.request.get(`${BASE}/admin/rapports/export?type=ventes`)).status(), 403);
+  const anon = await browser.newContext();
+  assert.equal((await anon.request.get(`${BASE}/admin/rapports/export?type=impayes`)).status(), 401);
+  await anon.close();
+});
+
+await step("En-têtes de sécurité (CSP avec nonce, anti-iframe)", async () => {
+  const res = await ap.request.get(`${BASE}/`);
+  assert.match(res.headers()["content-security-policy"], /script-src 'self' 'nonce-[^']+' 'strict-dynamic'/);
+  assert.equal(res.headers()["x-frame-options"], "DENY");
+  assert.equal((await ap.request.get(`${BASE}/api/sante`)).status(), 200);
 });
 
 await step("Formulaire de contact enregistré et visible en administration", async () => {
@@ -628,7 +662,7 @@ await step("Journal d'audit : changements tracés", async () => {
 
 await step("Responsive : pas de défilement horizontal (375 / 768 / 1280 px)", async () => {
   for (const [w, h] of [[375, 812], [768, 1024], [1280, 900]]) {
-    for (const [name, p, url] of [["accueil", page, "/"], ["catalogue", page, "/catalogue"], ["admin", ap, "/admin/produits"], ["stock", ap, "/admin/stock"], ["pro", page, "/espace-pro"], ["panier", page, "/panier"], ["commandes-admin", ap, "/admin/commandes?statut=all"], ["factures-admin", ap, "/admin/factures"], ["paiements-admin", ap, "/admin/paiements?statut=all"], ["livraisons-admin", ap, "/admin/livraisons?statut=all"]]) {
+    for (const [name, p, url] of [["accueil", page, "/"], ["catalogue", page, "/catalogue"], ["admin", ap, "/admin/produits"], ["stock", ap, "/admin/stock"], ["pro", page, "/espace-pro"], ["panier", page, "/panier"], ["commandes-admin", ap, "/admin/commandes?statut=all"], ["factures-admin", ap, "/admin/factures"], ["paiements-admin", ap, "/admin/paiements?statut=all"], ["livraisons-admin", ap, "/admin/livraisons?statut=all"], ["rapports", ap, "/admin/rapports"]]) {
       await p.setViewportSize({ width: w, height: h });
       await p.goto(BASE + url);
       const overflow = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

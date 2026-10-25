@@ -26,7 +26,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           Pas encore de compte ? <Link href="/inscription" className="font-semibold text-brand-700 hover:underline">Créer un compte</Link>
         </p>
         <p className="mt-2 text-center text-xs text-slate-500">
-          Mot de passe oublié ? <Link href="/contact?sujet=R%C3%A9initialisation%20du%20mot%20de%20passe" className="underline">Contactez-nous</Link>.
+          Mot de passe oublié ? <Link href="/contact?sujet=R%C3%A9initialisation%20du%20mot%20de%20passe" className="underline">Contactez-nous</Link> : après vérification de votre identité, nous vous communiquerons un mot de passe temporaire.
         </p>
       </Card>
     </div>

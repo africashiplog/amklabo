@@ -130,3 +130,23 @@ export async function createStaffUser(actor: Actor | null, input: z.input<typeof
     throw err;
   }
 }
+
+/**
+ * Réinitialisation par un administrateur (aucun e-mail n'est configuré) :
+ * mot de passe temporaire affiché une seule fois, sessions fermées.
+ */
+export async function resetUserPassword(actor: Actor | null, userId: string) {
+  assertCan(actor, "users.manage");
+  if (userId === actor.id) throw new UserError("Utilisez « Mon compte » pour changer votre propre mot de passe.");
+  const tempPassword = randomBytes(9).toString("base64url");
+  const hash = await hashPassword(tempPassword);
+  await tx(async (db) => {
+    const u = await queryOne<{ status: string }>("SELECT status FROM users WHERE id = $1 FOR UPDATE", [userId], db);
+    if (!u) throw new UserError("Utilisateur introuvable.");
+    if (u.status === "archived") throw new UserError("Ce compte est archivé.");
+    await db.query("UPDATE users SET password_hash = $2 WHERE id = $1", [userId, hash]);
+    await deleteUserSessions(userId, db);
+    await audit(actor, "user.password_reset", "user", userId, {}, db);
+  });
+  return tempPassword;
+}

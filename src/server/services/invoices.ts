@@ -209,7 +209,7 @@ export const lineSchema = z.object({
   description: z.string().trim().min(1, "Désignation requise").max(300),
   sku: z.string().trim().max(64).optional().transform((v) => v || null),
   unitLabel: z.string().trim().min(1).max(40),
-  quantity: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number().int("Nombre entier attendu").min(1).max(1_000_000)),
+  quantity: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number<string | number>().int("Nombre entier attendu").min(1).max(1_000_000)),
   unitPrice: z.string().transform((v, ctx) => {
     const m = parseMRU(v);
     if (m === null) { ctx.addIssue({ code: "custom", message: "Prix invalide" }); return z.NEVER; }

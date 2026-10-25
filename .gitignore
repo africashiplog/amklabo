@@ -9,3 +9,4 @@ next-env.d.ts
 e2e/screenshots
 storage/test-uploads
 storage/e2e-uploads
+backups

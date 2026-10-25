@@ -1,0 +1,40 @@
+# Déploiement de référence : PostgreSQL + application. Placer un proxy HTTPS devant (voir DEPLOIEMENT.md).
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: amklabo_owner
+      POSTGRES_PASSWORD: ${OWNER_DB_PASSWORD:?OWNER_DB_PASSWORD requis}
+      POSTGRES_DB: amklabo
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amklabo_owner -d amklabo"]
+      interval: 10s
+      retries: 5
+
+  tools:
+    build: { context: ., dockerfile: Dockerfile.tools }
+    profiles: ["tools"]
+    environment:
+      DATABASE_OWNER_URL: postgres://amklabo_owner:${OWNER_DB_PASSWORD}@db:5432/amklabo
+      DATABASE_URL: postgres://amklabo_app:${APP_DB_PASSWORD}@db:5432/amklabo
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD requis}
+    depends_on: { db: { condition: service_healthy } }
+
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://amklabo_app:${APP_DB_PASSWORD}@db:5432/amklabo
+      APP_URL: ${APP_URL:-https://exemple.mr}
+    volumes:
+      - uploads:/data/uploads
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on: { db: { condition: service_healthy } }
+
+volumes:
+  db-data:
+  uploads:

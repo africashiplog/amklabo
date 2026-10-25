@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { pool } from "@/server/db";
 import { ForbiddenError, UserError } from "@/server/errors";
-import { createProduct, updateProduct } from "@/server/services/catalog";
+import { createCategory, createProduct, updateProduct } from "@/server/services/catalog";
 import { reviewBusinessAccount, submitBusinessRequest } from "@/server/services/business";
 import {
   addTier, applyDiscount, getPriceContext, listVisibleTiers, quote, quoteLines, savePromotion, setCustomerPrice,
@@ -118,7 +118,8 @@ describe("moteur de tarification", () => {
 
   it("promotion de catégorie appliquée aux produits de la catégorie", async () => {
     const admin = await makeActor(["admin"]);
-    const cat = await firstCategoryId();
+    // Catégorie dédiée : la promotion ne doit pas affecter les produits des autres tests.
+    const cat = (await createCategory(admin, { name: `Promo ${Date.now()}`, parentId: null, isActive: true })).id;
     const { id } = await createProduct(admin, baseProduct(cat, { retailPrice: "200" }));
     const today = new Date().toISOString().slice(0, 10);
     await savePromotion(admin, null, {

@@ -210,7 +210,7 @@ async function lockPo(db: PoolClient, id: string) {
 
 export const poItemSchema = z.object({
   productId: z.string().uuid("Produit requis"),
-  quantity: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number().int("Nombre entier attendu").min(1).max(1_000_000)),
+  quantity: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number<string | number>().int("Nombre entier attendu").min(1).max(1_000_000)),
   unitCost: z.string().optional().transform((v, ctx) => {
     if (!v?.trim()) return null;
     const m = parseMRU(v);

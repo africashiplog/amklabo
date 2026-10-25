@@ -60,9 +60,9 @@ export const settingsSchema = z.object({
     return m;
   }),
   taxLabel: z.string().trim().min(1).max(20),
-  invoiceDueDays: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number().int().min(0, "Minimum 0").max(365, "Maximum 365")),
-  returnWindowDays: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number().int().min(0, "Minimum 0").max(365, "Maximum 365")),
-  expiryAlertDays: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number().int("Nombre entier attendu").min(1, "Minimum 1").max(730, "Maximum 730")),
+  invoiceDueDays: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number<string | number>().int().min(0, "Minimum 0").max(365, "Maximum 365")),
+  returnWindowDays: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number<string | number>().int().min(0, "Minimum 0").max(365, "Maximum 365")),
+  expiryAlertDays: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number<string | number>().int("Nombre entier attendu").min(1, "Minimum 1").max(730, "Maximum 730")),
 });
 
 export async function updateStoreSettings(actor: Actor | null, input: z.input<typeof settingsSchema>) {

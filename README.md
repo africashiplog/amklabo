@@ -1,7 +1,9 @@
 # AMKLABO — Medical & Laboratory
 
 Plateforme e-commerce (détail et gros) de matériel médical et de laboratoire pour la Mauritanie.
-**État : Phases 1 à 4 terminées (fondation ; clients, prix, stock ; commandes, factures ; paiements, livraisons).**
+**État : Phases 1 à 5 terminées** (fondation ; clients, prix, stock ; commandes, factures ; paiements, livraisons ; rapports, sécurité, déploiement).
+
+Documents : [Déploiement et exploitation](DEPLOIEMENT.md) · [Revue de sécurité](docs/SECURITE.md) · [Recette (critères d'acceptation)](docs/RECETTE.md)
 
 ## Architecture
 
@@ -89,6 +91,11 @@ Tous les prix sont calculés côté serveur ; un prix venant du navigateur n'est
 - Statuts propres (à planifier, affectée, en cours, livrée, échec) avec historique immuable ; « En cours » et « Livrée » font avancer la commande.
 - Le livreur ne voit que ses livraisons : destinataire, téléphone, adresse, colis, instructions, montant à encaisser. Fiche de livraison imprimable.
 
+### Rapports (`src/server/services/reports.ts`)
+- Ventes par jour, semaine ou mois (série continue), réparties entre détail et professionnels ; chiffre d'affaires facturé (factures moins avoirs) ; ventes par produit (top) et par catégorie ; stock physique, réservé et disponible, ruptures, péremptions ; annulations et retours ; paiements par moyen (confirmés, en attente, refusés, remboursés) ; factures impayées et soldes clients.
+- Filtres de date (bornes incluses, 3 ans maximum). Exports CSV (`;`, UTF-8 avec BOM) protégés par les permissions, journalisés et neutralisant l'injection de formules.
+- Aucun calcul de marge : les montants affichés ne sont pas des bénéfices.
+
 ### Matrice des rôles
 | Permission | Admin | Stock | Commandes | Comptable | Livreur |
 |---|:-:|:-:|:-:|:-:|:-:|
@@ -135,18 +142,14 @@ npm run dev                     # http://localhost:3000
 
 ## Tests
 ```bash
-npm test                        # 113 tests d'intégration sur la base amklabo_test (réinitialisée à chaque lancement)
+npm test                        # 123 tests d'intégration sur la base amklabo_test (réinitialisée à chaque lancement)
 npm run build && <démarrer le serveur sur la base de test, port 3100>
-BASE_URL=http://localhost:3100 ADMIN_EMAIL=… ADMIN_PASSWORD=… npm run test:e2e   # 49 étapes Chromium
+BASE_URL=http://localhost:3100 ADMIN_EMAIL=… ADMIN_PASSWORD=… npm run test:e2e   # 52 étapes Chromium
 ```
 La base `amklabo_test` doit exister (même propriétaire, mêmes extensions).
 
 ## Déploiement
-- `npm run build` produit un serveur autonome : copier `public/` dans `.next/standalone/public` et `.next/static` dans `.next/standalone/.next/static`, puis lancer `node .next/standalone/server.js` (variables `PORT`, `DATABASE_URL`, `UPLOAD_DIR`).
-- En production : HTTPS obligatoire (cookie `secure`), `NODE_ENV=production`, `DATABASE_URL` avec le rôle `amklabo_app` uniquement.
-- Le proxy doit transmettre `X-Forwarded-For` (limitation des tentatives de connexion par IP).
-- `UPLOAD_DIR` sur un volume persistant et sauvegardé ; sauvegarde quotidienne de PostgreSQL (`pg_dump`).
-- Aucune clé secrète n'est envoyée au navigateur.
+Voir **[DEPLOIEMENT.md](DEPLOIEMENT.md)** : Docker Compose (PostgreSQL et application), HTTPS avec Caddy, sauvegardes et restauration, maintenance, mises à jour, supervision (`/api/sante`) et liste de mise en service.
 
 ## Ce que doit fournir AMKLABO
 - Coordonnées, informations de facturation (raison sociale, NIF, RC) : *Administration → Paramètres*.
@@ -163,4 +166,5 @@ La base `amklabo_test` doit exister (même propriétaire, mêmes extensions).
 - ~~Phase 3~~ : panier, commandes, réservation de stock, factures PDF, avoirs, espace client.
 - ~~Phase 4~~ : paiements (vérification manuelle), livraisons et livreurs.
 - **Phase 4** : paiements (procédure manuelle de vérification Bankily/Masrivi/Sedad/Bimbank/Click/espèces ; API officielles si disponibles), livraisons et livreurs.
-- **Phase 5** : rapports, exports CSV, notifications (e-mail/SMS : fournisseur à choisir), traduction arabe.
+- ~~Phase 5~~ : rapports, exports CSV, revue de sécurité, déploiement.
+- **Évolutions possibles** : notifications par e-mail ou SMS (fournisseur à choisir), réinitialisation de mot de passe par e-mail, double authentification, traduction arabe et police arabe pour les PDF, intégrations officielles des opérateurs de paiement si une API est fournie.

@@ -23,8 +23,20 @@ export const registerSchema = z.object({
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 
+export const MAX_REGISTRATIONS_PER_IP_PER_HOUR = 10;
+
 export async function registerCustomer(input: RegisterInput, meta: { ip?: string | null } = {}) {
   const data = registerSchema.parse(input);
+  // Limitation anti-abus : nombre de comptes créés par adresse IP et par heure.
+  if (meta.ip) {
+    const recent = await queryOne<{ n: number }>(
+      "SELECT count(*)::int AS n FROM audit_logs WHERE action = 'account.register' AND ip = $1 AND created_at > now() - interval '1 hour'",
+      [meta.ip],
+    );
+    if ((recent?.n ?? 0) >= MAX_REGISTRATIONS_PER_IP_PER_HOUR) {
+      throw new UserError("Trop de comptes créés depuis cette connexion. Réessayez plus tard.");
+    }
+  }
   const passwordHash = await hashPassword(data.password);
   try {
     return await tx(async (db) => {

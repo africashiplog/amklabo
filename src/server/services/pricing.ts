@@ -199,7 +199,7 @@ const optDate = z
   .transform((v) => (v ? v : null))
   .refine((v) => v === null || /^\d{4}-\d{2}-\d{2}$/.test(v), "Date invalide");
 
-const qty = z.union([z.number(), z.string().trim()]).pipe(z.coerce.number().int("Nombre entier attendu").min(1).max(1_000_000));
+const qty = z.union([z.number(), z.string().trim()]).pipe(z.coerce.number<string | number>().int("Nombre entier attendu").min(1).max(1_000_000));
 
 export const tierSchema = z
   .object({ audience: z.enum(["all", "business"]), minQty: qty, unitPrice: money, validFrom: optDate, validTo: optDate })

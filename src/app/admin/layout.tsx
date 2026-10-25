@@ -12,6 +12,7 @@ export const metadata: Metadata = { title: { default: "Administration", template
 
 const NAV: { href: string; label: string; permission: Permission }[] = [
   { href: "/admin", label: "Tableau de bord", permission: "dashboard.view" },
+  { href: "/admin/rapports", label: "Rapports", permission: "reports.view" },
   { href: "/admin/commandes", label: "Commandes", permission: "orders.read" },
   { href: "/admin/factures", label: "Factures et avoirs", permission: "invoices.read" },
   { href: "/admin/paiements", label: "Paiements", permission: "payments.view" },
@@ -38,12 +39,14 @@ const NAV: { href: string; label: string; permission: Permission }[] = [
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const actor = await requirePermissionPage("admin.access");
   const settings = await getStoreSettings();
-  const links = NAV.filter((n) => can(actor.roles, n.permission));
+  // « Mes livraisons » ne concerne que les livreurs (les gestionnaires voient toutes les livraisons).
+  const links = NAV.filter((n) => can(actor.roles, n.permission))
+    .filter((n) => n.href !== "/admin/livraisons/mes" || !can(actor.roles, "deliveries.manage"));
   const roleLabel = actor.roles.filter((r) => !r.startsWith("customer")).map((r) => t.role[r]).join(", ");
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[16rem_1fr]">
-      <aside className="border-b border-slate-200 bg-white print:hidden lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-e">
+      <aside className="border-b border-slate-200 bg-white print:hidden lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:border-b-0 lg:border-e">
         <div className="flex items-center justify-between gap-2 p-4 lg:block">
           <Link href="/admin"><Logo logoPath={settings.logo_path} name={settings.store_name} className="h-10 lg:h-12" /></Link>
           <div className="flex items-center gap-3 lg:block">
@@ -51,14 +54,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             <form action={logoutAction} className="lg:hidden"><button className="text-xs text-slate-600 underline">Déconnexion</button></form>
           </div>
         </div>
-        <nav aria-label="Administration" className="flex gap-1 overflow-x-auto px-2 pb-3 lg:block lg:space-y-0.5 lg:overflow-visible">
+        <nav aria-label="Administration" className="flex gap-1 overflow-x-auto px-2 pb-3 lg:block lg:min-h-0 lg:flex-1 lg:space-y-0.5 lg:overflow-y-auto lg:overflow-x-visible">
           {links.map((l) => (
             <Link key={l.href} href={l.href} className="block shrink-0 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-brand-50 hover:text-brand-800">
               {l.label}
             </Link>
           ))}
         </nav>
-        <div className="hidden border-t border-slate-100 p-4 text-xs text-slate-500 lg:absolute lg:bottom-0 lg:block lg:w-full">
+        <div className="hidden shrink-0 border-t border-slate-100 p-4 text-xs text-slate-500 lg:block">
           <p className="font-medium text-slate-700">{actor.fullName}</p>
           <p>{roleLabel}</p>
           <div className="mt-2 flex gap-3">

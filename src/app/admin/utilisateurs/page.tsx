@@ -6,7 +6,7 @@ import { formatDateTime } from "@/lib/format";
 import { requirePermissionPage } from "@/server/current";
 import { STAFF_ROLES } from "@/server/permissions";
 import { adminListUsers } from "@/server/services/users";
-import { createStaffAction, setRolesAction, setUserStatusAction } from "../actions";
+import { createStaffAction, resetPasswordAction, setRolesAction, setUserStatusAction } from "../actions";
 
 export default async function AdminUsers({ searchParams }: { searchParams: Promise<Record<string, string | undefined>> }) {
   const actor = await requirePermissionPage("users.manage");
@@ -53,7 +53,10 @@ export default async function AdminUsers({ searchParams }: { searchParams: Promi
                       <SubmitButton size="sm" variant="secondary">Enregistrer les rôles</SubmitButton>
                     </ActionForm>
                     {!self && u.status !== "archived" && (
-                      <div className="mt-3 border-t border-slate-100 pt-3">
+                      <div className="mt-3 flex flex-wrap items-start gap-2 border-t border-slate-100 pt-3">
+                        <ConfirmAction action={resetPasswordAction} fields={{ userId: u.id }} label="Réinitialiser le mot de passe" variant="secondary"
+                          title={`Réinitialiser le mot de passe de ${u.full_name} ?`} confirmLabel="Générer un mot de passe temporaire"
+                          description={<>Un mot de passe temporaire sera affiché une seule fois sous le bouton. Toutes les sessions de <strong>{u.email}</strong> seront fermées. Vérifiez l&apos;identité de la personne avant de le lui transmettre.</>} />
                         {u.status === "active" ? (
                           <ConfirmAction action={setUserStatusAction} fields={{ userId: u.id, status: "suspended" }} label="Suspendre le compte"
                             title={`Suspendre le compte de ${u.full_name} ?`}

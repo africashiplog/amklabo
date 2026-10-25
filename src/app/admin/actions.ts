@@ -11,7 +11,7 @@ import {
 } from "@/server/services/catalog";
 import { markMessageHandled } from "@/server/services/contact";
 import { replaceLogo, resetLogo, updateContentPage, updateStoreSettings } from "@/server/services/settings";
-import { createStaffUser, setStaffRoles, setUserStatus } from "@/server/services/users";
+import { createStaffUser, resetUserPassword, setStaffRoles, setUserStatus } from "@/server/services/users";
 import { saveZone } from "@/server/services/zones";
 
 const refreshSite = () => revalidatePath("/", "layout");
@@ -222,5 +222,12 @@ export async function markHandledAction(_: ActionState, fd: FormData): Promise<A
     await markMessageHandled(await getActor(), formString(fd, "id"));
     revalidatePath("/admin/messages");
     return "Message marqué comme traité.";
+  });
+}
+
+export async function resetPasswordAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  return runAction(async () => {
+    const pw = await resetUserPassword(await getActor(), formString(fd, "userId"));
+    return `Mot de passe temporaire (affiché une seule fois, à transmettre de façon sûre) : ${pw}`;
   });
 }

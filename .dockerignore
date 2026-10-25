@@ -1,0 +1,8 @@
+node_modules
+.next
+.env
+.env.*
+storage
+backups
+e2e/screenshots
+.git

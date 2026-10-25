@@ -103,7 +103,7 @@ export async function assertLotInfo(db: Db, productId: string, lotNumber: string
 // ---------------------------------------------------------------------------
 // Opérations manuelles
 // ---------------------------------------------------------------------------
-const qty = z.union([z.number(), z.string().trim()]).pipe(z.coerce.number().int("Nombre entier attendu").min(1, "Au moins 1").max(1_000_000));
+const qty = z.union([z.number(), z.string().trim()]).pipe(z.coerce.number<string | number>().int("Nombre entier attendu").min(1, "Au moins 1").max(1_000_000));
 const optText = (max: number) => z.string().trim().max(max).optional().transform((v) => v || null);
 const optDate = z.string().optional().transform((v) => v || null)
   .refine((v) => v === null || /^\d{4}-\d{2}-\d{2}$/.test(v), "Date invalide");
@@ -192,7 +192,7 @@ export async function allocateFefo(db: PoolClient, productId: string, quantity: 
 
 export const countSchema = z.object({
   lotId: z.string().uuid(),
-  counted: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number().int("Nombre entier attendu").min(0).max(1_000_000)),
+  counted: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number<string | number>().int("Nombre entier attendu").min(0).max(1_000_000)),
   reason: z.string().trim().min(3, "Motif requis").max(300),
 });
 

@@ -8,7 +8,9 @@ import { getSessionActor, SESSION_COOKIE } from "./session";
 
 export async function clientIp(): Promise<string | null> {
   const h = await headers();
-  const forwarded = h.get("x-forwarded-for")?.split(",")[0]?.trim();
+  // La DERNIÈRE valeur est celle ajoutée par notre proxy inverse ; les précédentes
+  // peuvent être fournies par le client et ne sont pas fiables.
+  const forwarded = h.get("x-forwarded-for")?.split(",").pop()?.trim();
   const ip = forwarded || h.get("x-real-ip") || null;
   // N'accepte qu'une adresse IPv4/IPv6 plausible (stockée dans une colonne inet).
   return ip && /^[0-9a-fA-F:.]{3,45}$/.test(ip) ? ip : null;
