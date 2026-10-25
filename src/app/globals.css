@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Inter Variable";
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/* Le contenu rédigé par AMKLABO est affiché en texte simple, paragraphes conservés. */
+.prose-plain p + p {
+  margin-top: 0.85rem;
+}
+
+/* Les listes déroulantes ne doivent jamais élargir la page sur mobile. */
+select {
+  max-width: 100%;
+}
