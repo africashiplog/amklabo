@@ -27,7 +27,7 @@ export default async function ProductStockPage({ params }: { params: Promise<{ i
     <>
       <Link href="/admin/stock" className="text-sm text-brand-700 hover:underline">← Stock</Link>
       <PageHeader title={p.name}
-        description={<><span className="font-mono">{p.sku}</span> · disponible : <strong>{p.on_hand}</strong> · seuil d&apos;alerte : {p.stock_alert_threshold}{p.track_lots ? " · suivi par lots" : ""}{p.expired_qty > 0 && <> · <span className="text-red-700">{p.expired_qty} en lots périmés</span></>}</>}
+        description={<><span className="font-mono">{p.sku}</span> · disponible : <strong>{p.on_hand}</strong> · réservé : {p.reserved} · seuil d&apos;alerte : {p.stock_alert_threshold}{p.track_lots ? " · suivi par lots" : ""}{p.expired_qty > 0 && <> · <span className="text-red-700">{p.expired_qty} en lots périmés</span></>}</>}
         actions={can(actor.roles, "catalog.manage") && <Link href={`/admin/produits/${p.id}`} className="text-sm font-semibold text-brand-700 hover:underline">Fiche produit →</Link>} />
 
       <div className="grid gap-6 xl:grid-cols-[1fr_22rem]">
@@ -36,7 +36,7 @@ export default async function ProductStockPage({ params }: { params: Promise<{ i
             <h2 className="mb-2 font-semibold">Lots</h2>
             {lots.length === 0 ? <Card className="p-5 text-sm text-slate-600">Aucun stock enregistré.</Card> : (
               <Table>
-                <thead><tr><th className={th}>Lot</th><th className={th}>Péremption</th><th className={th}>Quantité</th><th className={th}>Origine</th>{showCosts && <th className={th}>Coût unit.</th>}<th className={th}>Inventaire</th></tr></thead>
+                <thead><tr><th className={th}>Lot</th><th className={th}>Péremption</th><th className={th}>Physique</th><th className={th}>Réservé</th><th className={th}>Origine</th>{showCosts && <th className={th}>Coût unit.</th>}<th className={th}>Inventaire</th></tr></thead>
                 <tbody className="divide-y divide-slate-100">
                   {lots.map((l) => {
                     const expired = l.expiry_date !== null && l.expiry_date < today();
@@ -45,6 +45,7 @@ export default async function ProductStockPage({ params }: { params: Promise<{ i
                         <td className={`${td} font-mono text-xs`}>{l.lot_number ?? "—"}</td>
                         <td className={td}>{l.expiry_date ?? "—"} {expired && l.qty_on_hand > 0 && <Badge tone="red">Périmé</Badge>}</td>
                         <td className={`${td} font-semibold`}>{l.qty_on_hand}</td>
+                        <td className={td}>{l.qty_reserved}</td>
                         <td className={`${td} text-xs`}>{l.po_number ?? "Entrée manuelle"}<div className="text-slate-400">{l.supplier_name ?? ""} · {formatDate(l.received_at)}</div></td>
                         {showCosts && <td className={td}>{l.unit_cost_minor != null ? formatMRU(l.unit_cost_minor) : "—"}</td>}
                         <td className={td}>
@@ -122,7 +123,7 @@ export default async function ProductStockPage({ params }: { params: Promise<{ i
               </Field>
               <Field name="lotId" label="Lot" as="select" hint="(vide = lot qui périme le plus tôt)">
                 <option value="">Automatique (FEFO)</option>
-                {activeLots.map((l) => <option key={l.id} value={l.id}>{l.lot_number ?? "sans n°"} — {l.qty_on_hand} — {l.expiry_date ?? "sans date"}</option>)}
+                {activeLots.map((l) => <option key={l.id} value={l.id}>{l.lot_number ?? "sans n°"} — {l.qty_on_hand - l.qty_reserved} dispo. — {l.expiry_date ?? "sans date"}</option>)}
               </Field>
               <Field name="quantity" label="Quantité" type="number" min={1} required />
               <Field name="reason" label="Motif" required />

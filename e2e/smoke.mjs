@@ -218,7 +218,7 @@ await step("Avant approbation : le client ne voit pas le tarif professionnel", a
   assert.match(text, /1 000 MRU/);
   assert.doesNotMatch(text, /900 MRU/);
   assert.doesNotMatch(text, /Tarif professionnel/);
-  await page.getByText("Rupture de stock").waitFor();
+  await page.getByText("Rupture de stock", { exact: true }).waitFor();
 });
 
 await step("Approbation du compte professionnel (admin)", async () => {
@@ -323,6 +323,145 @@ await step("Promotion particuliers : appliquée aux visiteurs, pas au profession
   await anon.close();
 });
 
+// ---------------------------------------------------------------- Phase 3
+let orderNumber = "";
+let orderAdminUrl = "";
+let invoiceAdminUrl = "";
+
+await step("Activation de la zone de livraison Nouakchott (frais 150 MRU)", async () => {
+  await ap.goto(`${BASE}/admin/livraison`);
+  const card = ap.locator("div.rounded-xl", { has: ap.getByRole("heading", { name: "Nouakchott", exact: true }) }).first();
+  await card.getByLabel("Frais de livraison (MRU)").fill("150");
+  await card.getByLabel(/Zone active/).check();
+  await card.getByRole("button", { name: "Enregistrer" }).click();
+  await ap.getByText("Active · 150 MRU").first().waitFor();
+});
+
+await step("Adresse rattachée à une zone desservie", async () => {
+  await page.goto(`${BASE}/compte#adresses`);
+  const form = page.locator("form", { hasText: "Ajouter l'adresse" });
+  await form.getByLabel("Nom de l'adresse").fill("Laboratoire");
+  await form.getByLabel("Destinataire").fill("Laboratoire E2E");
+  await form.getByLabel("Téléphone").fill("+222 22 33 44 55");
+  await form.getByLabel("Zone de livraison").selectOption({ label: "Nouakchott" });
+  await form.getByRole("textbox", { name: /^Adresse/ }).fill("Avenue E2E, bâtiment 2");
+  await form.getByRole("button", { name: "Ajouter l'adresse" }).click();
+  await page.getByText("Avenue E2E, bâtiment 2").first().waitFor();
+});
+
+await step("Ajout au panier (prix négocié) et récapitulatif serveur", async () => {
+  await page.goto(`${proProductUrl}?qte=10`);
+  await page.getByRole("button", { name: "Ajouter au panier" }).click();
+  await page.getByText("Ajouté au panier.").waitFor();
+  await page.goto(`${BASE}/panier`);
+  const text = await page.locator("main").innerText();
+  assert.match(text, /Sous-total\s+8 500 MRU/);
+  await page.getByRole("link", { name: "Passer la commande" }).click();
+  await page.waitForURL(/\/commande$/);
+  await page.getByRole("radio", { name: /Laboratoire —/ }).check();
+  assert.match(await page.locator("main").innerText(), /Total\s+8 650 MRU/);
+});
+
+await step("Validation de la commande : numéro, statuts séparés, stock réservé", async () => {
+  await page.getByLabel(/Instructions pour la livraison/).fill("Livrer à l'accueil du laboratoire");
+  await page.getByRole("button", { name: "Valider la commande" }).click();
+  await page.waitForURL(/\/compte\/commandes\/CMD-\d{4}-\d{4}\?confirmee=1/);
+  orderNumber = page.url().match(/CMD-\d{4}-\d{4}/)[0];
+  const text = await page.locator("main").innerText();
+  assert.match(text, /Nouvelle/);
+  assert.match(text, /En attente de paiement/);
+  assert.match(text, /Total\s+8 650 MRU/);
+  await ap.goto(`${BASE}/admin/stock?q=${proSku}`);
+  const row = ap.locator("tr", { hasText: proName });
+  assert.match(await row.innerText(), /18[\s\S]*10/); // 28 physiques : 18 disponibles, 10 réservés
+});
+
+await step("Admin : confirmation → préparation → prête (sortie de stock)", async () => {
+  await ap.goto(`${BASE}/admin/commandes?q=${orderNumber}`);
+  await ap.getByRole("link", { name: orderNumber }).click();
+  await ap.waitForURL(/\/admin\/commandes\/[0-9a-f-]+/);
+  orderAdminUrl = ap.url();
+  for (const label of ["Confirmée", "En préparation", "Prête à expédier"]) {
+    await ap.getByRole("button", { name: `→ ${label}` }).click();
+    await ap.getByRole("dialog").getByRole("button", { name: "Confirmer" }).click();
+    await ap.getByText(label, { exact: true }).first().waitFor();
+    await ap.reload();
+  }
+  await ap.getByText(/Sorti du stock le/).waitFor();
+});
+
+await step("Facture : brouillon depuis la commande puis émission avec numéro définitif", async () => {
+  await ap.goto(orderAdminUrl);
+  await ap.getByRole("button", { name: "Préparer la facture" }).click();
+  await ap.waitForURL(/\/admin\/factures\/[0-9a-f-]+/);
+  invoiceAdminUrl = ap.url();
+  await ap.getByText("Brouillon sans valeur comptable").waitFor();
+  await ap.getByRole("button", { name: "Émettre la facture" }).click();
+  await ap.getByRole("dialog").getByRole("button", { name: "Émettre" }).click();
+  await ap.getByRole("heading", { name: /Facture FAC-\d{4}-\d{4}/ }).waitFor();
+  assert.equal(await ap.getByRole("button", { name: "Émettre la facture" }).count(), 0);
+});
+
+await step("PDF : accessible à l'admin et au client, refusé aux autres", async () => {
+  const invoiceId = invoiceAdminUrl.split("/").pop();
+  const adminPdf = await ap.request.get(`${BASE}/factures/${invoiceId}/pdf`);
+  assert.equal(adminPdf.headers()["content-type"], "application/pdf");
+  const body = await adminPdf.body();
+  assert.equal(body.subarray(0, 5).toString(), "%PDF-");
+  fs.writeFileSync(`${shots}/facture.pdf`, body);
+  const clientPdf = await page.request.get(`${BASE}/factures/${invoiceId}/pdf`);
+  assert.equal(clientPdf.status(), 200);
+  const anon = await browser.newContext();
+  assert.equal((await anon.request.get(`${BASE}/factures/${invoiceId}/pdf`)).status(), 401);
+  await anon.close();
+  await page.goto(`${BASE}/compte/factures`);
+  await page.getByText(/FAC-\d{4}-\d{4}/).first().waitFor();
+});
+
+await step("Notifications du client sur les changements de statut", async () => {
+  await page.goto(`${BASE}/compte/notifications`);
+  await page.getByText(`Commande ${orderNumber} : confirmée`).waitFor();
+  await page.getByText(/Facture FAC-.* disponible/).waitFor();
+});
+
+await step("Avoir partiel sur la facture", async () => {
+  await ap.goto(invoiceAdminUrl);
+  await ap.getByRole("button", { name: "Établir un avoir" }).click();
+  await ap.getByRole("dialog").getByRole("button", { name: "Créer le brouillon d'avoir" }).click();
+  await ap.waitForURL((u) => u.toString() !== invoiceAdminUrl);
+  await ap.getByLabel("Quantité").fill("1");
+  await ap.getByRole("button", { name: "OK" }).click();
+  await ap.getByText("850 MRU").first().waitFor();
+  await ap.getByRole("button", { name: "Émettre l'avoir" }).click();
+  await ap.getByRole("dialog").getByRole("button", { name: "Émettre" }).click();
+  await ap.getByRole("heading", { name: /Avoir AV-\d{4}-\d{4}/ }).waitFor();
+});
+
+await step("Commande annulée par le client avant confirmation : stock libéré", async () => {
+  await page.goto(proProductUrl);
+  await page.getByLabel("Quantité").fill("2");
+  await page.getByRole("button", { name: "Ajouter au panier" }).click();
+  await page.getByText("Ajouté au panier.").waitFor();
+  await page.goto(`${BASE}/commande`);
+  await page.getByRole("radio", { name: /Laboratoire —/ }).check();
+  await page.getByRole("button", { name: "Valider la commande" }).click();
+  await page.waitForURL(/confirmee=1/);
+  await page.getByRole("button", { name: "Annuler la commande" }).click();
+  await page.getByRole("dialog").getByLabel("Motif").fill("Commande en double");
+  await page.getByRole("dialog").getByRole("button", { name: "Annuler la commande" }).click();
+  // La page se met à jour : le bouton d'annulation disparaît.
+  await page.getByRole("button", { name: "Annuler la commande" }).waitFor({ state: "detached" });
+  await page.reload();
+  await page.getByText(/Commande annulée : Annulée par le client/).waitFor();
+});
+
+await step("Tableau de bord : chiffre d'affaires facturé réel", async () => {
+  await ap.goto(`${BASE}/admin`);
+  await ap.getByText("Chiffre d'affaires facturé").waitFor();
+  // La base de test contient aussi les documents des tests d'intégration : on vérifie la présence du calcul.
+  assert.match(await ap.locator("body").innerText(), /factures émises [\d\u202f,]+ MRU − avoirs [\d\u202f,]+ MRU/);
+});
+
 await step("Formulaire de contact enregistré et visible en administration", async () => {
   await page.goto(`${BASE}/contact?sujet=Demande%20E2E%20${id}`);
   await page.getByLabel("Message").fill("Bonjour, je souhaite un devis pour 500 boîtes.");
@@ -349,7 +488,7 @@ await step("Journal d'audit : changements tracés", async () => {
 
 await step("Responsive : pas de défilement horizontal (375 / 768 / 1280 px)", async () => {
   for (const [w, h] of [[375, 812], [768, 1024], [1280, 900]]) {
-    for (const [name, p, url] of [["accueil", page, "/"], ["catalogue", page, "/catalogue"], ["admin", ap, "/admin/produits"], ["stock", ap, "/admin/stock"], ["pro", page, "/espace-pro"]]) {
+    for (const [name, p, url] of [["accueil", page, "/"], ["catalogue", page, "/catalogue"], ["admin", ap, "/admin/produits"], ["stock", ap, "/admin/stock"], ["pro", page, "/espace-pro"], ["panier", page, "/panier"], ["commandes-admin", ap, "/admin/commandes?statut=all"], ["factures-admin", ap, "/admin/factures"]]) {
       await p.setViewportSize({ width: w, height: h });
       await p.goto(BASE + url);
       const overflow = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

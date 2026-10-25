@@ -5,7 +5,9 @@ import { t } from "@/i18n/fr";
 import { formatDateTime } from "@/lib/format";
 import { requireActorPage } from "@/server/current";
 import { can } from "@/server/permissions";
-import { getDashboardStats } from "@/server/services/dashboard";
+import { getDashboardStats, getSalesStats, PERIODS } from "@/server/services/dashboard";
+import { formatMRU } from "@/lib/money";
+import { ORDER_STATUS } from "@/server/services/orders";
 import { getStockAlertCounts } from "@/server/services/stock";
 
 function Stat({ label, value, href, tone = "blue", sub }: { label: string; value: number; href?: string; tone?: "blue" | "green" | "amber"; sub?: string }) {
@@ -21,22 +23,51 @@ function Stat({ label, value, href, tone = "blue", sub }: { label: string; value
 }
 
 const UPCOMING = [
-  ["Chiffre d'affaires et commandes", "Phase 3 — commandes"],
-  ["Ventes en gros / au détail", "Phase 3 — commandes"],
-  ["Stock réservé par les commandes", "Phase 3 — commandes"],
   ["Paiements à vérifier", "Phase 4 — paiements"],
-  ["Factures impayées", "Phase 3 — factures"],
+  ["Livraisons en attente / en cours", "Phase 4 — livraisons"],
+  ["Rapports détaillés et exports CSV", "Phase 5 — rapports"],
 ] as const;
 
-export default async function AdminDashboard() {
+function Money({ label, value, sub, href }: { label: string; value: number; sub?: string; href?: string }) {
+  const body = (
+    <Card className="h-full p-5">
+      <p className="text-sm text-slate-600">{label}</p>
+      <p className="mt-2 text-2xl font-bold text-brand-800">{formatMRU(value)}</p>
+      {sub && <p className="mt-1 text-xs text-slate-500">{sub}</p>}
+    </Card>
+  );
+  return href ? <Link href={href}>{body}</Link> : body;
+}
+
+export default async function AdminDashboard({ searchParams }: { searchParams: Promise<{ periode?: string }> }) {
   const actor = await requireActorPage("/admin");
   if (!can(actor.roles, "dashboard.view")) redirect("/acces-refuse");
+  const sales = await getSalesStats(actor, Number((await searchParams).periode) || 30);
   const [{ counts: c, recentCustomers, recentActivity }, stock] = await Promise.all([getDashboardStats(actor), getStockAlertCounts(actor)]);
   const stockLink = can(actor.roles, "stock.manage");
 
   return (
     <>
       <PageHeader title="Tableau de bord" description="Indicateurs calculés en temps réel à partir de la base de données." />
+      <nav className="mb-4 flex flex-wrap gap-2 text-sm" aria-label="Période">
+        {Object.entries(PERIODS).map(([k, label]) => (
+          <Link key={k} href={`/admin?periode=${k}`} className={`rounded-full px-3 py-1.5 font-medium ring-1 ${String(sales.days) === k ? "bg-brand-700 text-white ring-brand-700" : "bg-white text-slate-700 ring-slate-300"}`}>{label}</Link>
+        ))}
+      </nav>
+      <h2 className="mb-3 font-semibold text-slate-900">Ventes — {PERIODS[String(sales.days) as keyof typeof PERIODS].toLowerCase()}</h2>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {sales.revenue && <Money label="Chiffre d'affaires facturé" value={sales.revenue.invoiced - sales.revenue.credited} sub={`factures émises ${formatMRU(sales.revenue.invoiced)} − avoirs ${formatMRU(sales.revenue.credited)}`} href="/admin/factures" />}
+        {sales.revenue && <Money label="Factures impayées" value={sales.revenue.unpaid_minor} sub={`${sales.revenue.unpaid_count} facture(s) — règlements : Phase 4`} href="/admin/factures?impayees=1" />}
+        <Stat label="Commandes" value={sales.orders.total} sub="hors annulées" href="/admin/commandes?statut=all" />
+        <Stat label="Commandes à traiter" value={sales.orders.to_process} href="/admin/commandes" tone={sales.orders.to_process ? "amber" : "green"} />
+        <Money label="Commandes au détail" value={sales.orders.retail_minor} sub={`${sales.orders.retail} commande(s)`} />
+        <Money label="Commandes en gros (pros)" value={sales.orders.business_minor} sub={`${sales.orders.business} commande(s)`} />
+        <Stat label="Demandes d'annulation" value={sales.orders.cancel_requests} href="/admin/commandes?statut=all&signal=cancel_request" tone={sales.orders.cancel_requests ? "amber" : "blue"} />
+        <Stat label="Retours en cours" value={sales.orders.returns_open} href="/admin/commandes?statut=all&signal=return" tone={sales.orders.returns_open ? "amber" : "blue"} />
+      </div>
+      <p className="mt-2 text-xs text-slate-500">Le chiffre d&apos;affaires est le montant facturé (TTC si une taxe est configurée), et non un bénéfice.</p>
+
+      <h2 className="mb-3 mt-8 font-semibold text-slate-900">Catalogue et clients</h2>
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label="Produits publiés" value={c.products_published} href="/admin/produits?statut=published" tone="green" sub={`${c.products_total} au total`} />
         <Stat label="Brouillons" value={c.products_draft} href="/admin/produits?statut=draft" />
@@ -59,7 +90,20 @@ export default async function AdminDashboard() {
         <Stat label="Comptes pro approuvés" value={c.business_approved} href="/admin/professionnels?statut=approved" tone="green" />
       </div>
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-2">
+      <div className="mt-8 grid gap-6 lg:grid-cols-3">
+        <Card className="p-5">
+          <h2 className="font-semibold">Dernières commandes</h2>
+          {sales.latest.length === 0 ? <p className="mt-3 text-sm text-slate-500">Aucune commande pour le moment.</p> : (
+            <ul className="mt-3 divide-y divide-slate-100 text-sm">
+              {sales.latest.map((o) => (
+                <li key={o.id} className="flex justify-between gap-2 py-2">
+                  <span><Link href={`/admin/commandes/${o.id}`} className="font-mono text-brand-800 hover:underline">{o.number}</Link> <span className="text-slate-500">· {o.business_name ?? o.customer_name} · {ORDER_STATUS[o.status as "new"]}</span></span>
+                  <span className="shrink-0 font-medium">{formatMRU(o.total_minor)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
         <Card className="p-5">
           <h2 className="font-semibold">Derniers clients inscrits</h2>
           {recentCustomers.length === 0 ? <p className="mt-3 text-sm text-slate-500">Aucun client pour le moment.</p> : (

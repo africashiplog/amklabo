@@ -46,9 +46,15 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
           </Link>
         </div>
       )}
-      <div className="mt-4"><Alert tone="info">
-        Le suivi des commandes, des factures et des paiements sera disponible dans votre espace dès l&apos;ouverture de la commande en ligne.
-      </Alert></div>
+      {profile?.customer_type && (
+        <nav className="mt-4 grid gap-3 sm:grid-cols-3" aria-label="Espace client">
+          {[["/compte/commandes", "Mes commandes", "Suivi, annulation, retour, recommande"], ["/compte/factures", "Mes factures", "Téléchargement des factures et avoirs"], ["/compte/notifications", "Notifications", "Changements de statut de vos commandes"]].map(([href, label, sub]) => (
+            <Link key={href} href={href} className="rounded-xl border border-slate-200 bg-white p-4 hover:border-brand-200">
+              <span className="font-semibold text-brand-800">{label}</span><span className="block text-xs text-slate-500">{sub}</span>
+            </Link>
+          ))}
+        </nav>
+      )}
 
       <div className="mt-8 grid gap-6 lg:grid-cols-2">
         <Card className="p-6">

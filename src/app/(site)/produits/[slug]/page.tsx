@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AddToCart } from "@/components/add-to-cart";
 import { Gallery } from "@/components/gallery";
 import { PlainText } from "@/components/plain-text";
 import { ProductImagePlaceholder, unitLabel } from "@/components/product-card";
@@ -105,13 +106,19 @@ export default async function ProductPage({ params, searchParams }: Props) {
                 Professionnel de santé ? <Link href="/espace-pro" className="font-semibold text-brand-700 underline">Demandez un compte professionnel</Link> pour accéder aux tarifs de gros.
               </p>
             )}
-            <div className="mt-5 rounded-lg bg-brand-50 p-4 text-sm text-brand-900">
-              La commande en ligne sera bientôt disponible. Pour commander dès maintenant, contactez-nous en indiquant
-              la référence <span className="font-mono">{p.sku}</span>.
-            </div>
-            <LinkButton href={`/contact?sujet=${encodeURIComponent(`Produit ${p.sku} — ${p.name} (quantité ${qty})`)}`} className="mt-4 w-full sm:w-auto">
-              Demander ce produit
-            </LinkButton>
+            {unavailable ? (
+              <p className="mt-5 rounded-lg bg-amber-50 p-4 text-sm text-amber-900">Ce produit n&apos;est pas disponible à la commande actuellement.</p>
+            ) : !inStock ? (
+              <p className="mt-5 rounded-lg bg-slate-100 p-4 text-sm text-slate-700">Rupture de stock : la commande en ligne reprendra dès le réapprovisionnement.</p>
+            ) : actor ? (
+              <AddToCart productId={p.id} minQty={p.min_order_qty} defaultQty={qty} back={`/produits/${p.slug}`} />
+            ) : (
+              <LinkButton href={`/connexion?next=${encodeURIComponent(`/produits/${p.slug}`)}`} variant="success" className="mt-5">Se connecter pour commander</LinkButton>
+            )}
+            <p className="mt-4 text-xs text-slate-500">
+              Besoin d&apos;un devis ou d&apos;une grande quantité ?{" "}
+              <Link href={`/contact?sujet=${encodeURIComponent(`Produit ${p.sku} — ${p.name} (quantité ${qty})`)}`} className="font-semibold text-brand-700 underline">Contactez-nous</Link>.
+            </p>
           </div>
 
           {p.specs.length > 0 && (

@@ -34,7 +34,12 @@ const OUT_TYPES = ["adjustment_out", "return_to_supplier", "loss", "expiry_write
 export async function applyMovement(
   db: PoolClient,
   actor: Actor | null,
-  m: { lotId: string; type: MovementType; quantity: number; reason?: string | null; purchaseOrderId?: string | null },
+  m: {
+    lotId: string; type: MovementType; quantity: number; reason?: string | null; purchaseOrderId?: string | null;
+    orderId?: string | null;
+    /** Sortie de marchandise réservée (expédition d'une commande) : diminue aussi le réservé. */
+    fromReservation?: boolean;
+  },
 ) {
   if (!Number.isInteger(m.quantity) || m.quantity === 0) throw new UserError("Quantité invalide.");
   const isIn = (IN_TYPES as readonly string[]).includes(m.type);
@@ -42,18 +47,21 @@ export async function applyMovement(
   let lot: { product_id: string; qty_on_hand: number } | null;
   try {
     lot = await queryOne<{ product_id: string; qty_on_hand: number }>(
-      "UPDATE stock_lots SET qty_on_hand = qty_on_hand + $2 WHERE id = $1 RETURNING product_id, qty_on_hand",
-      [m.lotId, m.quantity], db,
+      `UPDATE stock_lots SET qty_on_hand = qty_on_hand + $2,
+              qty_reserved = qty_reserved + CASE WHEN $3::boolean THEN $2 ELSE 0 END
+        WHERE id = $1 RETURNING product_id, qty_on_hand`,
+      [m.lotId, m.quantity, m.fromReservation === true], db,
     );
   } catch (err) {
-    if (pgCode(err) === "23514") throw new UserError("Stock insuffisant dans ce lot : opération refusée.");
+    // Contrainte de base : stock négatif, ou sortie de quantités réservées par des commandes.
+    if (pgCode(err) === "23514") throw new UserError("Stock disponible insuffisant dans ce lot (quantités réservées par des commandes incluses) : opération refusée.");
     throw err;
   }
   if (!lot) throw new UserError("Lot introuvable.");
   await db.query(
-    `INSERT INTO inventory_movements (product_id, lot_id, movement_type, quantity, balance_after, reason, purchase_order_id, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-    [lot.product_id, m.lotId, m.type, m.quantity, lot.qty_on_hand, m.reason ?? null, m.purchaseOrderId ?? null, actor?.id ?? null],
+    `INSERT INTO inventory_movements (product_id, lot_id, movement_type, quantity, balance_after, reason, purchase_order_id, order_id, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+    [lot.product_id, m.lotId, m.type, m.quantity, lot.qty_on_hand, m.reason ?? null, m.purchaseOrderId ?? null, m.orderId ?? null, actor?.id ?? null],
   );
   return lot.qty_on_hand;
 }
@@ -153,18 +161,20 @@ export async function recordExit(actor: Actor | null, input: z.input<typeof exit
 }
 
 /**
- * Répartit une quantité sur les lots disponibles (péremption la plus proche d'abord).
- * Verrouille les lots concernés pour la durée de la transaction.
+ * Répartit une quantité sur le stock disponible (physique − réservé) des lots,
+ * péremption la plus proche d'abord. Verrouille les lots pour la transaction,
+ * ce qui sérialise les commandes et sorties concurrentes sur un même produit.
  */
 export async function allocateFefo(db: PoolClient, productId: string, quantity: number, lotId: string | null = null) {
-  const lots = await query<{ id: string; qty_on_hand: number }>(
-    `SELECT id, qty_on_hand FROM stock_lots
-      WHERE product_id = $1 AND qty_on_hand > 0 AND ($2::uuid IS NULL OR id = $2::uuid)
+  const rows = await query<{ id: string; qty_on_hand: number; qty_reserved: number }>(
+    `SELECT id, qty_on_hand, qty_reserved FROM stock_lots
+      WHERE product_id = $1 AND ($2::uuid IS NULL OR id = $2::uuid)
         AND ($2::uuid IS NOT NULL OR expiry_date IS NULL OR expiry_date >= current_date)
       ORDER BY expiry_date NULLS LAST, received_at, id
       FOR UPDATE`,
     [productId, lotId], db,
   );
+  const lots = rows.map((l) => ({ id: l.id, qty_on_hand: l.qty_on_hand - l.qty_reserved })).filter((l) => l.qty_on_hand > 0);
   const available = lots.reduce((s, l) => s + l.qty_on_hand, 0);
   if (available < quantity) {
     throw new UserError(`Stock insuffisant : ${available} disponible(s)${lotId ? " dans ce lot" : " (lots non périmés)"}, ${quantity} demandé(s).`);
@@ -210,12 +220,15 @@ export async function recordCount(actor: Actor | null, input: z.input<typeof cou
 // ---------------------------------------------------------------------------
 export type StockRow = {
   id: string; name: string; sku: string; status: string; track_lots: boolean; sale_unit: string;
-  stock_alert_threshold: number; on_hand: number; expired_qty: number; next_expiry: string | null;
+  stock_alert_threshold: number; on_hand: number; reserved: number; physical: number; expired_qty: number; next_expiry: string | null;
 };
 
+// on_hand = disponible à la vente (non périmé, non réservé) ; physical = quantité physique non périmée.
 const STOCK_SELECT = `
   SELECT p.id, p.name, p.sku, p.status, p.track_lots, p.sale_unit, p.stock_alert_threshold,
-         coalesce(sum(l.qty_on_hand) FILTER (WHERE l.expiry_date IS NULL OR l.expiry_date >= current_date), 0)::int AS on_hand,
+         coalesce(sum(l.qty_on_hand - l.qty_reserved) FILTER (WHERE l.expiry_date IS NULL OR l.expiry_date >= current_date), 0)::int AS on_hand,
+         coalesce(sum(l.qty_reserved), 0)::int AS reserved,
+         coalesce(sum(l.qty_on_hand) FILTER (WHERE l.expiry_date IS NULL OR l.expiry_date >= current_date), 0)::int AS physical,
          coalesce(sum(l.qty_on_hand) FILTER (WHERE l.expiry_date < current_date), 0)::int AS expired_qty,
          min(l.expiry_date) FILTER (WHERE l.qty_on_hand > 0 AND l.expiry_date >= current_date) AS next_expiry
     FROM products p LEFT JOIN stock_lots l ON l.product_id = p.id`;
@@ -247,12 +260,12 @@ export async function getStockOverview(actor: Actor | null, f: { q?: string; fil
 }
 
 export type LotRow = {
-  id: string; lot_number: string | null; expiry_date: string | null; qty_on_hand: number; received_at: Date;
+  id: string; lot_number: string | null; expiry_date: string | null; qty_on_hand: number; qty_reserved: number; received_at: Date;
   supplier_name: string | null; unit_cost_minor: number | null; po_number: string | null;
 };
 export type MovementRow = {
   id: string; movement_type: MovementType; quantity: number; balance_after: number; reason: string | null;
-  created_at: Date; lot_number: string | null; author: string | null; po_number: string | null;
+  created_at: Date; lot_number: string | null; author: string | null; po_number: string | null; order_number: string | null;
 };
 
 export async function getProductStock(actor: Actor | null, productId: string) {
@@ -260,7 +273,7 @@ export async function getProductStock(actor: Actor | null, productId: string) {
   const product = await queryOne<StockRow>(`${STOCK_SELECT} WHERE p.id = $1 GROUP BY p.id`, [productId]);
   if (!product) return null;
   const lots = await query<LotRow>(
-    `SELECT l.id, l.lot_number, l.expiry_date, l.qty_on_hand, l.received_at, s.name AS supplier_name, l.unit_cost_minor,
+    `SELECT l.id, l.lot_number, l.expiry_date, l.qty_on_hand, l.qty_reserved, l.received_at, s.name AS supplier_name, l.unit_cost_minor,
             po.number AS po_number
        FROM stock_lots l LEFT JOIN suppliers s ON s.id = l.supplier_id
        LEFT JOIN purchase_order_items i ON i.id = l.purchase_order_item_id LEFT JOIN purchase_orders po ON po.id = i.purchase_order_id
@@ -269,9 +282,10 @@ export async function getProductStock(actor: Actor | null, productId: string) {
   );
   const movements = await query<MovementRow>(
     `SELECT m.id, m.movement_type, m.quantity, m.balance_after, m.reason, m.created_at, l.lot_number,
-            pr.full_name AS author, po.number AS po_number
+            pr.full_name AS author, po.number AS po_number, o.number AS order_number
        FROM inventory_movements m JOIN stock_lots l ON l.id = m.lot_id
        LEFT JOIN profiles pr ON pr.user_id = m.created_by LEFT JOIN purchase_orders po ON po.id = m.purchase_order_id
+       LEFT JOIN orders o ON o.id = m.order_id
       WHERE m.product_id = $1 ORDER BY m.created_at DESC, m.id LIMIT 200`,
     [productId],
   );
@@ -296,14 +310,11 @@ export async function listExpiringLots(actor: Actor | null, days?: number) {
   );
 }
 
-/**
- * Quantités disponibles à la vente (lots non périmés). Les réservations des
- * commandes en cours seront déduites à partir de la Phase 3.
- */
+/** Quantités disponibles à la vente : lots non périmés, déduction faite des réservations. */
 export async function getAvailability(productIds: string[], db?: Db): Promise<Map<string, number>> {
   if (productIds.length === 0) return new Map();
   const rows = await query<{ product_id: string; qty: number }>(
-    `SELECT product_id, coalesce(sum(qty_on_hand), 0)::int AS qty FROM stock_lots
+    `SELECT product_id, coalesce(sum(qty_on_hand - qty_reserved), 0)::int AS qty FROM stock_lots
       WHERE product_id = ANY($1::uuid[]) AND (expiry_date IS NULL OR expiry_date >= current_date)
       GROUP BY product_id`,
     [productIds], db,

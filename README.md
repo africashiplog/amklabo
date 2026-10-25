@@ -1,7 +1,7 @@
 # AMKLABO — Medical & Laboratory
 
 Plateforme e-commerce (détail et gros) de matériel médical et de laboratoire pour la Mauritanie.
-**État : Phases 1 (fondation) et 2 (clients, prix, stock) terminées.**
+**État : Phases 1 (fondation), 2 (clients, prix, stock) et 3 (commandes, factures) terminées.**
 
 ## Architecture
 
@@ -52,6 +52,25 @@ Tous les prix sont calculés côté serveur ; un prix venant du navigateur n'est
 - Sinon **anonymisation** : effacement des données personnelles, historique conservé.
 - Notes internes en ajout seul, jamais visibles par le client.
 
+### Commandes (`src/server/services/orders.ts`)
+- Panier réservé aux clients connectés. À la validation, le serveur recalcule prix, remises et frais de livraison (zone de l'adresse, seuil de gratuité). Si le total diffère de celui affiché, la commande est refusée avec le nouveau montant.
+- Clé d'idempotence : un double clic ou un renvoi du formulaire ne crée qu'une commande.
+- Réservation du stock dans la même transaction (FEFO, verrou des lots). `CHECK (qty_reserved <= qty_on_hand)` en base : aucune survente, même pour des commandes simultanées (testé).
+- Les lignes de commande conservent nom, référence, unité, prix appliqué, prix public et règle tarifaire au moment de l'achat.
+- Transitions : Nouvelle → En attente de confirmation → Confirmée → En préparation → Prête à expédier → En livraison → Livrée ; annulation possible jusqu'à « En préparation ». Le stock sort physiquement au passage à « Prête à expédier ».
+- Le client annule lui-même avant confirmation, puis fait une demande d'annulation (acceptée ou refusée par l'équipe). Les retours sont possibles dans le délai configuré après livraison ; la remise en stock est facultative.
+- Les statuts de commande et de paiement (`payment_status`) sont distincts ; la livraison aura le sien en Phase 4.
+- Notifications internes à chaque changement (aucun e-mail ni SMS configuré).
+
+### Factures (`src/server/services/invoices.ts`)
+- Brouillon (depuis une commande confirmée, ou manuel) → émission. Le numéro définitif `FAC-AAAA-NNNN` (avoirs : `AV-…`) est attribué à l'émission et les coordonnées du magasin et du client sont figées.
+- Une facture émise ne peut être ni modifiée ni supprimée : la base le refuse (déclencheurs), même au propriétaire du schéma.
+- Annulation motivée et tracée ; le numéro n'est jamais réutilisé. Refusée si un règlement ou un avoir existe. Une commande facturée ne peut être annulée qu'après annulation de la facture ou émission d'un avoir.
+- Avoirs totaux ou partiels, plafonnés au montant de la facture.
+- Suppression des brouillons : droit distinct (`invoices.delete`, administrateur).
+- PDF (pdfkit) avec le logo officiel, téléchargeable par le personnel autorisé et par le client propriétaire uniquement. Polices standard : caractères latins uniquement (l'arabe nécessitera l'intégration d'une police).
+- Taxe : les prix saisis sont des prix finaux. Si un taux est configuré, la part incluse est affichée. Par défaut : aucune taxe, à valider.
+
 ### Matrice des rôles
 | Permission | Admin | Stock | Commandes | Comptable | Livreur |
 |---|:-:|:-:|:-:|:-:|:-:|
@@ -64,6 +83,12 @@ Tous les prix sont calculés côté serveur ; un prix venant du navigateur n'est
 | Clients (modification, notes, statut) | ✓ | | ✓ | | |
 | Approbation des comptes pro | ✓ | | | | |
 | Suppression / anonymisation | ✓ | | | | |
+| Commandes (lecture) | ✓ | ✓ | ✓ | ✓ | |
+| Commandes (statuts, annulations, retours) | ✓ | | ✓ | | |
+| Factures (lecture) | ✓ | | ✓ | ✓ | |
+| Factures (brouillons, émission, annulation, avoirs) | ✓ | | | ✓ | |
+| Suppression de brouillons de facture | ✓ | | | | |
+| Chiffre d'affaires | ✓ | | | ✓ | |
 | Paramètres, utilisateurs, audit | ✓ | | | | |
 
 Le rôle Livreur n'a encore aucun écran (module livraison : Phase 4).
@@ -88,9 +113,9 @@ npm run dev                     # http://localhost:3000
 
 ## Tests
 ```bash
-npm test                        # 74 tests d'intégration sur la base amklabo_test (réinitialisée à chaque lancement)
+npm test                        # 98 tests d'intégration sur la base amklabo_test (réinitialisée à chaque lancement)
 npm run build && <démarrer le serveur sur la base de test, port 3100>
-BASE_URL=http://localhost:3100 ADMIN_EMAIL=… ADMIN_PASSWORD=… npm run test:e2e   # 28 étapes Chromium
+BASE_URL=http://localhost:3100 ADMIN_EMAIL=… ADMIN_PASSWORD=… npm run test:e2e   # 39 étapes Chromium
 ```
 La base `amklabo_test` doit exister (même propriétaire, mêmes extensions).
 
@@ -104,12 +129,13 @@ La base `amklabo_test` doit exister (même propriétaire, mêmes extensions).
 ## Ce que doit fournir AMKLABO
 - Coordonnées, informations de facturation (raison sociale, NIF, RC) : *Administration → Paramètres*.
 - Textes des CGV, confidentialité, livraison/retours, à propos (à faire valider juridiquement) : *Pages de contenu*.
-- Frais de livraison de Nouakchott, puis activation de la zone.
+- Frais de livraison de Nouakchott, puis activation de la zone (la commande en ligne est impossible tant qu'aucune zone n'est active).
+- Régime fiscal (taxe incluse ou non), échéance des factures, délai de retour, et validation du modèle de facture.
 - Le fichier source du logo en haute résolution / vectoriel si disponible (le logo actuel est celui fourni, recadré de ses marges blanches uniquement ; l'original est dans `public/brand/logo-original.webp`).
 - Le catalogue réel : produits, prix, photos et caractéristiques vérifiées.
 
 ## Feuille de route
 - ~~Phase 2~~ : comptes professionnels, tarification, stock par lots, fournisseurs et achats, gestion complète des clients.
-- **Phase 3** : panier, commandes (réservation de stock transactionnelle via `allocateFefo`/`applyMovement`, prix figés depuis `quoteLines`), factures PDF, avoirs, historique client.
+- ~~Phase 3~~ : panier, commandes, réservation de stock, factures PDF, avoirs, espace client.
 - **Phase 4** : paiements (procédure manuelle de vérification Bankily/Masrivi/Sedad/Bimbank/Click/espèces ; API officielles si disponibles), livraisons et livreurs.
 - **Phase 5** : rapports, exports CSV, notifications (e-mail/SMS : fournisseur à choisir), traduction arabe.

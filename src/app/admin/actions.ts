@@ -141,6 +141,8 @@ export async function saveSettingsAction(_: ActionState, fd: FormData): Promise<
       taxId: formString(fd, "taxId"), tradeRegister: formString(fd, "tradeRegister"),
       bankDetails: formString(fd, "bankDetails"), invoiceFooter: formString(fd, "invoiceFooter"),
       expiryAlertDays: formString(fd, "expiryAlertDays") || "90",
+      taxRate: formString(fd, "taxRate"), taxLabel: formString(fd, "taxLabel") || "TVA",
+      invoiceDueDays: formString(fd, "invoiceDueDays") || "0", returnWindowDays: formString(fd, "returnWindowDays") || "0",
     });
     refreshSite();
     return "Paramètres enregistrés.";

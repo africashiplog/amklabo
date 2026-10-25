@@ -8,3 +8,4 @@ REVOKE ALL ON schema_migrations FROM amklabo_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO amklabo_app;
 REVOKE UPDATE, DELETE, TRUNCATE ON inventory_movements FROM amklabo_app;
 REVOKE UPDATE, TRUNCATE ON customer_notes FROM amklabo_app;
+REVOKE UPDATE, DELETE, TRUNCATE ON order_status_history FROM amklabo_app;

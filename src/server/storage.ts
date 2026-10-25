@@ -22,12 +22,16 @@ export function detectImageType(buf: Buffer): "png" | "jpg" | "webp" | null {
 export const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", webp: "image/webp" };
 
 /** Enregistre une image validée par sa signature binaire ; retourne son chemin relatif. */
-export async function saveImage(file: File, folder: "products" | "brand"): Promise<string> {
+export async function saveImage(
+  file: File, folder: "products" | "brand", allowed: ("png" | "jpg" | "webp")[] = ["png", "jpg", "webp"],
+): Promise<string> {
   if (file.size === 0) throw new UserError("Le fichier est vide.");
   if (file.size > MAX_IMAGE_BYTES) throw new UserError("L'image dépasse la taille maximale de 5 Mo.");
   const buf = Buffer.from(await file.arrayBuffer());
   const type = detectImageType(buf);
-  if (!type) throw new UserError("Format non pris en charge. Utilisez PNG, JPEG ou WebP.");
+  if (!type || !allowed.includes(type)) {
+    throw new UserError(`Format non pris en charge. Utilisez ${allowed.map((a) => (a === "jpg" ? "JPEG" : a.toUpperCase())).join(", ")}.`);
+  }
   const rel = `${folder}/${randomUUID()}.${type}`;
   const abs = path.join(uploadRoot(), rel);
   await fs.mkdir(path.dirname(abs), { recursive: true });

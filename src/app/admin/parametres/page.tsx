@@ -1,6 +1,7 @@
 import { ActionForm, ConfirmAction, Field, SubmitButton } from "@/components/forms";
 import { Logo } from "@/components/logo";
 import { Card, PageHeader } from "@/components/ui";
+import { minorToInput } from "@/lib/money";
 import { requirePermissionPage } from "@/server/current";
 import { getStoreSettings } from "@/server/services/settings";
 import { resetLogoAction, saveSettingsAction, uploadLogoAction } from "../actions";
@@ -28,7 +29,7 @@ export default async function AdminSettings() {
           </Card>
           <Card className="space-y-4 p-6">
             <h2 className="font-semibold">Facturation</h2>
-            <p className="text-xs text-slate-500">Ces informations seront reprises sur les factures (Phase 3). Leur conformité doit être vérifiée par AMKLABO.</p>
+            <p className="text-xs text-slate-500">Ces informations sont figées sur chaque facture au moment de son émission. Leur conformité doit être vérifiée par AMKLABO.</p>
             <div className="grid gap-4 sm:grid-cols-3">
               <Field name="legalName" label="Raison sociale" defaultValue={s.legal_name ?? ""} />
               <Field name="taxId" label="NIF" defaultValue={s.tax_id ?? ""} />
@@ -36,10 +37,19 @@ export default async function AdminSettings() {
             </div>
             <Field name="bankDetails" label="Coordonnées bancaires / de paiement" as="textarea" rows={3} defaultValue={s.bank_details ?? ""} />
             <Field name="invoiceFooter" label="Mention de pied de facture" as="textarea" rows={2} defaultValue={s.invoice_footer ?? ""} />
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field name="taxRate" label="Taux de taxe inclus (%)" hint="(0 = aucune)" inputMode="decimal" defaultValue={minorToInput(s.tax_rate_bp)} />
+              <Field name="taxLabel" label="Libellé de la taxe" defaultValue={s.tax_label} />
+              <Field name="invoiceDueDays" label="Échéance (jours)" type="number" min={0} max={365} defaultValue={s.invoice_due_days} />
+            </div>
+            <p className="text-xs text-amber-800">Les prix saisis sont des prix finaux. Si un taux est indiqué, la facture affiche la part de taxe incluse. À configurer uniquement après validation du régime fiscal applicable.</p>
           </Card>
           <Card className="space-y-4 p-6">
-            <h2 className="font-semibold">Stock</h2>
-            <Field name="expiryAlertDays" label="Alerte de péremption (jours avant la date)" type="number" min={1} max={730} defaultValue={s.expiry_alert_days} className="max-w-xs" />
+            <h2 className="font-semibold">Stock et retours</h2>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field name="expiryAlertDays" label="Alerte de péremption (jours avant la date)" type="number" min={1} max={730} defaultValue={s.expiry_alert_days} />
+              <Field name="returnWindowDays" label="Délai de demande de retour (jours après livraison, 0 = désactivé)" type="number" min={0} max={365} defaultValue={s.return_window_days} />
+            </div>
           </Card>
           <div><SubmitButton>Enregistrer les paramètres</SubmitButton></div>
         </ActionForm>
@@ -49,7 +59,7 @@ export default async function AdminSettings() {
           <div className="rounded-lg border border-slate-200 bg-white p-4"><Logo logoPath={s.logo_path} name={s.store_name} className="mx-auto h-20" /></div>
           <p className="text-xs text-slate-500">{s.logo_path ? "Logo de remplacement actif." : "Logo officiel AMKLABO fourni par le propriétaire."} Les proportions sont toujours conservées.</p>
           <ActionForm action={uploadLogoAction} resetOnSuccess>
-            <Field name="logo" label="Remplacer le logo" hint="(PNG, JPEG ou WebP, 5 Mo max)" type="file" accept="image/png,image/jpeg,image/webp" required />
+            <Field name="logo" label="Remplacer le logo" hint="(PNG ou JPEG, 5 Mo max)" type="file" accept="image/png,image/jpeg" required />
             <SubmitButton variant="secondary" pendingLabel="Envoi…">Téléverser</SubmitButton>
           </ActionForm>
           {s.logo_path && (

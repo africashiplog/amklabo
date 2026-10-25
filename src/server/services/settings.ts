@@ -1,4 +1,5 @@
 import { z } from "../validation";
+import { parseMRU } from "@/lib/money";
 import { assertCan, type Actor } from "../actor";
 import { audit } from "../audit";
 import { query, queryOne, tx } from "../db";
@@ -23,6 +24,10 @@ export type StoreSettings = {
   bank_details: string | null;
   invoice_footer: string | null;
   expiry_alert_days: number;
+  tax_rate_bp: number;
+  tax_label: string;
+  invoice_due_days: number;
+  return_window_days: number;
 };
 
 export const DEFAULT_LOGO = "/brand/logo.png";
@@ -49,6 +54,14 @@ export const settingsSchema = z.object({
   tradeRegister: opt(80),
   bankDetails: opt(1000),
   invoiceFooter: opt(1000),
+  taxRate: z.string().optional().transform((v, ctx) => {
+    const m = parseMRU(v?.trim() || "0");
+    if (m === null || m > 10000) { ctx.addIssue({ code: "custom", message: "Taux invalide (0 à 100)" }); return z.NEVER; }
+    return m;
+  }),
+  taxLabel: z.string().trim().min(1).max(20),
+  invoiceDueDays: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number().int().min(0, "Minimum 0").max(365, "Maximum 365")),
+  returnWindowDays: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number().int().min(0, "Minimum 0").max(365, "Maximum 365")),
   expiryAlertDays: z.union([z.number(), z.string().trim()]).pipe(z.coerce.number().int("Nombre entier attendu").min(1, "Minimum 1").max(730, "Maximum 730")),
 });
 
@@ -60,10 +73,11 @@ export async function updateStoreSettings(actor: Actor | null, input: z.input<ty
     const after = await queryOne(
       `UPDATE store_settings SET store_name=$1, tagline=$2, email=$3, phone=$4, whatsapp=$5, address_line=$6,
               city=$7, opening_hours=$8, legal_name=$9, tax_id=$10, trade_register=$11, bank_details=$12,
-              invoice_footer=$13, updated_by=$14, expiry_alert_days=$15
+              invoice_footer=$13, updated_by=$14, expiry_alert_days=$15,
+              tax_rate_bp=$16, tax_label=$17, invoice_due_days=$18, return_window_days=$19
         WHERE id = 1 RETURNING *`,
       [d.storeName, d.tagline, d.email, d.phone, d.whatsapp, d.addressLine, d.city, d.openingHours,
-       d.legalName, d.taxId, d.tradeRegister, d.bankDetails, d.invoiceFooter, actor.id, d.expiryAlertDays],
+       d.legalName, d.taxId, d.tradeRegister, d.bankDetails, d.invoiceFooter, actor.id, d.expiryAlertDays, d.taxRate, d.taxLabel, d.invoiceDueDays, d.returnWindowDays],
       db,
     );
     await audit(actor, "settings.update", "store_settings", "1", { before, after }, db);
@@ -73,7 +87,8 @@ export async function updateStoreSettings(actor: Actor | null, input: z.input<ty
 /** Remplace le logo. Le logo d'origine reste disponible dans /public/brand. */
 export async function replaceLogo(actor: Actor | null, file: File) {
   assertCan(actor, "settings.manage");
-  const path = await saveImage(file, "brand");
+  // PNG ou JPEG uniquement : le logo est aussi intégré aux factures PDF.
+  const path = await saveImage(file, "brand", ["png", "jpg"]);
   const before = await queryOne<{ logo_path: string | null }>("SELECT logo_path FROM store_settings WHERE id = 1");
   await query("UPDATE store_settings SET logo_path = $1, updated_by = $2 WHERE id = 1", [path, actor.id]);
   await audit(actor, "settings.logo_replace", "store_settings", "1", { before, after: { logo_path: path } });

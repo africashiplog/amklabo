@@ -13,7 +13,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
   const r = await getStockOverview(actor, { q: sp.q, filter, page: Number(sp.page) || 1 });
   return (
     <>
-      <PageHeader title="Stock" description={`Quantités en unités de vente, hors lots périmés. Alerte de péremption : ${r.alertDays} jours (modifiable dans les paramètres).`} />
+      <PageHeader title="Stock" description={`Disponible = stock physique non périmé moins les quantités réservées par les commandes en cours. Unités de vente. Alerte de péremption : ${r.alertDays} jours (modifiable dans les paramètres).`} />
       <nav className="mb-3 flex flex-wrap gap-2 text-sm" aria-label="Filtres">
         {FILTERS.map(([k, label]) => (
           <Link key={k} href={`/admin/stock?filtre=${k}${sp.q ? `&q=${encodeURIComponent(sp.q)}` : ""}`}
@@ -27,7 +27,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
       </form>
       {r.items.length === 0 ? <EmptyState title="Aucun produit" /> : (
         <Table>
-          <thead><tr><th className={th}>Produit</th><th className={th}>Disponible</th><th className={th}>Seuil</th><th className={th}>Prochaine péremption</th><th className={th}>État</th></tr></thead>
+          <thead><tr><th className={th}>Produit</th><th className={th}>Disponible</th><th className={th}>Réservé</th><th className={th}>Seuil</th><th className={th}>Prochaine péremption</th><th className={th}>État</th></tr></thead>
           <tbody className="divide-y divide-slate-100">
             {r.items.map((p) => (
               <tr key={p.id} className="hover:bg-slate-50">
@@ -36,6 +36,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
                   <div className="font-mono text-xs text-slate-400">{p.sku}</div>
                 </td>
                 <td className={`${td} font-semibold`}>{p.on_hand} <span className="text-xs font-normal text-slate-500">{t.saleUnit[p.sale_unit as "box"].toLowerCase()}(s)</span></td>
+                <td className={td}>{p.reserved}</td>
                 <td className={td}>{p.stock_alert_threshold}</td>
                 <td className={td}>{p.next_expiry ?? (p.track_lots ? "—" : "non suivi")}</td>
                 <td className={td}>

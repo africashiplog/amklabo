@@ -14,6 +14,7 @@ import { ACTIVITIES, BUSINESS_STATUS, adminGetBusinessAccountForCustomer } from 
 import { listProductOptions } from "@/server/services/catalog";
 import { adminGetCustomer, getDeletionBlockers } from "@/server/services/customers";
 import { listCustomerPrices } from "@/server/services/pricing";
+import { listCustomerOrders, ORDER_STATUS } from "@/server/services/orders";
 import {
   addNoteAction, anonymizeCustomerAction, deleteCustomerAction, setCustomerStatusAction,
 } from "../../customer-actions";
@@ -32,6 +33,8 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
   const canPrice = can(actor.roles, "pricing.manage") && c.customer_type === "business" && !c.anonymized_at;
   const canDelete = can(actor.roles, "customers.delete");
   const products = canPrice ? await listProductOptions(actor) : [];
+  const orders = await listCustomerOrders(actor, id);
+  const canOrders = can(actor.roles, "orders.read");
   const statusTone = c.status === "active" ? "green" : c.status === "suspended" ? "amber" : "slate";
 
   return (
@@ -121,8 +124,18 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
           </Card>
 
           <Card className="p-6">
-            <h2 className="mb-1 font-semibold">Commandes, factures et paiements</h2>
-            <p className="text-sm text-slate-600">L&apos;historique apparaîtra ici avec les modules de commande et de facturation (Phase 3).</p>
+            <h2 className="mb-3 font-semibold">Commandes</h2>
+            {orders.length === 0 ? <p className="text-sm text-slate-600">Aucune commande.</p> : (
+              <ul className="divide-y divide-slate-100 text-sm">
+                {orders.map((o) => (
+                  <li key={o.id} className="flex flex-wrap justify-between gap-2 py-2">
+                    <span>{canOrders ? <Link href={`/admin/commandes/${o.id}`} className="font-mono text-brand-800 underline">{o.number}</Link> : <span className="font-mono">{o.number}</span>} · {formatDate(o.placed_at)} · {ORDER_STATUS[o.status]}</span>
+                    <span className="font-medium">{formatMRU(o.total_minor)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-3 text-xs text-slate-500">Les factures du client sont consultables dans <Link href={`/admin/factures?q=${encodeURIComponent(c.full_name)}`} className="underline">Factures et avoirs</Link>. Les paiements arrivent en Phase 4.</p>
           </Card>
         </div>
 

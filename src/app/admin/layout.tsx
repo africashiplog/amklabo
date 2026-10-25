@@ -12,6 +12,8 @@ export const metadata: Metadata = { title: { default: "Administration", template
 
 const NAV: { href: string; label: string; permission: Permission }[] = [
   { href: "/admin", label: "Tableau de bord", permission: "dashboard.view" },
+  { href: "/admin/commandes", label: "Commandes", permission: "orders.read" },
+  { href: "/admin/factures", label: "Factures et avoirs", permission: "invoices.read" },
   { href: "/admin/produits", label: "Produits", permission: "catalog.manage" },
   { href: "/admin/categories", label: "Catégories", permission: "catalog.manage" },
   { href: "/admin/promotions", label: "Promotions", permission: "pricing.manage" },

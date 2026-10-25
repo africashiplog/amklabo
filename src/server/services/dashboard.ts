@@ -1,4 +1,5 @@
 import { assertCan, type Actor } from "../actor";
+import { can } from "../permissions";
 import { query, queryOne } from "../db";
 
 /** Indicateurs calculés en direct à partir de la base de données. */
@@ -63,4 +64,46 @@ export async function listAuditLogs(actor: Actor | null, f: { action?: string; e
     args,
   );
   return { items, total, page, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
+}
+
+export const PERIODS = { "7": "7 derniers jours", "30": "30 derniers jours", "90": "90 derniers jours", "365": "12 derniers mois" } as const;
+
+/**
+ * Chiffre d'affaires facturé (factures émises moins avoirs émis, par date
+ * d'émission) et activité commerciale sur la période. Ce n'est pas un bénéfice.
+ */
+export async function getSalesStats(actor: Actor | null, days: number) {
+  assertCan(actor, "dashboard.view");
+  const d = [7, 30, 90, 365].includes(days) ? days : 30;
+  const revenue = can(actor.roles, "reports.view") || can(actor.roles, "invoices.read")
+    ? (await queryOne<{ invoiced: number; credited: number; unpaid_count: number; unpaid_minor: number }>(
+        `SELECT
+           coalesce(sum(total_minor) FILTER (WHERE kind = 'invoice' AND issue_date > current_date - $1::int), 0)::bigint AS invoiced,
+           coalesce(sum(total_minor) FILTER (WHERE kind = 'credit_note' AND issue_date > current_date - $1::int), 0)::bigint AS credited,
+           count(*) FILTER (WHERE kind = 'invoice' AND amount_paid_minor < total_minor
+             - coalesce((SELECT sum(cn.total_minor) FROM invoices cn WHERE cn.credited_invoice_id = invoices.id AND cn.status = 'issued'), 0))::int AS unpaid_count,
+           coalesce(sum(total_minor - amount_paid_minor
+             - coalesce((SELECT sum(cn.total_minor) FROM invoices cn WHERE cn.credited_invoice_id = invoices.id AND cn.status = 'issued'), 0))
+             FILTER (WHERE kind = 'invoice'), 0)::bigint AS unpaid_minor
+           FROM invoices WHERE status = 'issued'`,
+        [d],
+      ))!
+    : null;
+  const orders = (await queryOne<{ total: number; retail: number; business: number; retail_minor: number; business_minor: number; to_process: number; cancel_requests: number; returns_open: number }>(
+    `SELECT
+       count(*) FILTER (WHERE placed_at > now() - make_interval(days => $1) AND status <> 'cancelled')::int AS total,
+       count(*) FILTER (WHERE placed_at > now() - make_interval(days => $1) AND status <> 'cancelled' AND customer_type = 'retail')::int AS retail,
+       count(*) FILTER (WHERE placed_at > now() - make_interval(days => $1) AND status <> 'cancelled' AND customer_type = 'business')::int AS business,
+       coalesce(sum(total_minor) FILTER (WHERE placed_at > now() - make_interval(days => $1) AND status NOT IN ('cancelled', 'returned') AND customer_type = 'retail'), 0)::bigint AS retail_minor,
+       coalesce(sum(total_minor) FILTER (WHERE placed_at > now() - make_interval(days => $1) AND status NOT IN ('cancelled', 'returned') AND customer_type = 'business'), 0)::bigint AS business_minor,
+       count(*) FILTER (WHERE status IN ('new', 'pending_confirmation', 'confirmed', 'preparing', 'ready_to_ship'))::int AS to_process,
+       count(*) FILTER (WHERE cancel_requested_at IS NOT NULL)::int AS cancel_requests,
+       (SELECT count(*)::int FROM returns WHERE status IN ('requested', 'accepted')) AS returns_open
+     FROM orders`,
+    [d],
+  ))!;
+  const latest = await query<{ id: string; number: string; customer_name: string; business_name: string | null; total_minor: number; status: string; placed_at: Date }>(
+    "SELECT id, number, customer_name, business_name, total_minor, status, placed_at FROM orders ORDER BY placed_at DESC LIMIT 6",
+  );
+  return { days: d, revenue, orders, latest };
 }

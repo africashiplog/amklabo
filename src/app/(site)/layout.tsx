@@ -3,6 +3,8 @@ import { Logo } from "@/components/logo";
 import { getActor } from "@/server/current";
 import { can } from "@/server/permissions";
 import { listPublicCategories } from "@/server/services/catalog";
+import { unreadCount } from "@/server/services/notifications";
+import { cartCount } from "@/server/services/orders";
 import { CONTENT_PAGES, getStoreSettings } from "@/server/services/settings";
 import { logoutAction } from "../actions/auth";
 
@@ -19,6 +21,7 @@ const NAV = [
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
   const [settings, actor, categories] = await Promise.all([getStoreSettings(), getActor(), listPublicCategories()]);
   const isStaff = actor ? can(actor.roles, "admin.access") : false;
+  const [cart, unread] = actor ? await Promise.all([cartCount(actor), unreadCount(actor)]) : [0, 0];
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -51,8 +54,18 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
               <Link key={n.href} href={n.href} className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-brand-50 hover:text-brand-800">{n.label}</Link>
             ))}
           </nav>
-          <div className="ms-auto flex items-center gap-2 lg:ms-0">
+          <div className="ms-auto flex items-center gap-1 sm:gap-2 lg:ms-0">
             {isStaff && <Link href="/admin" className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-leaf-700 hover:bg-leaf-50 sm:inline-block">Administration</Link>}
+            {actor && (
+              <Link href="/compte/notifications" className="relative rounded-lg p-2 text-slate-700 hover:bg-slate-100" aria-label={`Notifications${unread ? ` (${unread} non lue${unread > 1 ? "s" : ""})` : ""}`}>
+                <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 20a2 2 0 0 0 4 0" /></svg>
+                {unread > 0 && <span className="absolute -end-0.5 -top-0.5 rounded-full bg-red-600 px-1.5 text-[10px] font-bold text-white">{unread}</span>}
+              </Link>
+            )}
+            <Link href="/panier" className="relative rounded-lg p-2 text-slate-700 hover:bg-slate-100" aria-label={`Panier${cart ? ` (${cart} produit${cart > 1 ? "s" : ""})` : ""}`}>
+              <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden><path d="M3 4h2l2.4 11.2a1 1 0 0 0 1 .8h9.2a1 1 0 0 0 1-.8L20 8H6M9 20a1 1 0 1 0 0 .01M17 20a1 1 0 1 0 0 .01" /></svg>
+              {cart > 0 && <span className="absolute -end-0.5 -top-0.5 rounded-full bg-leaf-600 px-1.5 text-[10px] font-bold text-white">{cart}</span>}
+            </Link>
             {actor ? (
               <Link href="/compte" className="rounded-lg bg-brand-50 px-3 py-2 text-sm font-semibold text-brand-800 hover:bg-brand-100">Mon compte</Link>
             ) : (

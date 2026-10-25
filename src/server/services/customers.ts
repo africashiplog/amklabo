@@ -163,17 +163,20 @@ export async function setCustomerStatus(actor: Actor | null, id: string, status:
 }
 
 /**
- * Historique transactionnel qui interdit la suppression définitive.
- * Les commandes, factures et paiements (Phases 3–4) s'ajouteront ici et
- * référenceront le client avec ON DELETE RESTRICT.
+ * Historique transactionnel qui interdit la suppression définitive
+ * (commandes et factures référencent aussi le client avec ON DELETE RESTRICT).
  */
 async function historyBlockers(customerId: string, db: Parameters<typeof queryOne>[2]) {
-  const row = await queryOne<{ business: boolean; prices: number }>(
+  const row = await queryOne<{ business: boolean; prices: number; orders: number; invoices: number }>(
     `SELECT EXISTS (SELECT 1 FROM business_accounts WHERE customer_id = $1 AND status IN ('approved', 'suspended')) AS business,
-            (SELECT count(*)::int FROM customer_prices WHERE customer_id = $1) AS prices`,
+            (SELECT count(*)::int FROM customer_prices WHERE customer_id = $1) AS prices,
+            (SELECT count(*)::int FROM orders WHERE customer_id = $1) AS orders,
+            (SELECT count(*)::int FROM invoices WHERE customer_id = $1) AS invoices`,
     [customerId], db,
   );
   const reasons: string[] = [];
+  if (row!.orders > 0) reasons.push(`${row!.orders} commande(s)`);
+  if (row!.invoices > 0) reasons.push(`${row!.invoices} facture(s)`);
   if (row!.business) reasons.push("compte professionnel approuvé");
   if (row!.prices > 0) reasons.push(`${row!.prices} prix négocié(s)`);
   return reasons;

@@ -27,6 +27,12 @@ export const PERMISSIONS = [
   "stock.manage",       // lots, entrées, sorties, ajustements
   "suppliers.manage",   // fournisseurs et bons d'achat
   "stock.view_costs",   // coûts d'achat
+  "orders.read",
+  "orders.manage",      // statuts, annulations, retours
+  "invoices.read",
+  "invoices.manage",    // brouillons, émission, annulation, avoirs
+  "invoices.delete",    // suppression des brouillons (distincte de la modification)
+  "reports.view",       // chiffre d'affaires
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -36,9 +42,9 @@ export type Permission = (typeof PERMISSIONS)[number];
 // qu'il crée reste en brouillon sans prix jusqu'à validation par un administrateur.
 const MATRIX: Record<Role, Permission[]> = {
   admin: [...PERMISSIONS],
-  stock_manager: ["admin.access", "dashboard.view", "catalog.manage", "stock.manage", "suppliers.manage", "stock.view_costs"],
-  order_manager: ["admin.access", "dashboard.view", "customers.read", "customers.manage", "messages.manage"],
-  accountant: ["admin.access", "dashboard.view", "customers.read", "stock.view_costs"],
+  stock_manager: ["admin.access", "dashboard.view", "catalog.manage", "stock.manage", "suppliers.manage", "stock.view_costs", "orders.read"],
+  order_manager: ["admin.access", "dashboard.view", "customers.read", "customers.manage", "messages.manage", "orders.read", "orders.manage", "invoices.read"],
+  accountant: ["admin.access", "dashboard.view", "customers.read", "stock.view_costs", "orders.read", "invoices.read", "invoices.manage", "reports.view"],
   delivery: ["admin.access"],
   customer_retail: [],
   customer_business: [],

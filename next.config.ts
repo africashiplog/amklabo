@@ -10,7 +10,7 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
-  serverExternalPackages: ["pg"],
+  serverExternalPackages: ["pg", "pdfkit"],
   experimental: {
     serverActions: { bodySizeLimit: "6mb" },
   },
