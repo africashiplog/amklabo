@@ -328,6 +328,24 @@ let orderNumber = "";
 let orderAdminUrl = "";
 let invoiceAdminUrl = "";
 
+await step("Moyens de paiement : Bankily refusé sans compte marchand, puis activé ; espèces activées", async () => {
+  await ap.goto(`${BASE}/admin/moyens-de-paiement`);
+  const bankily = ap.locator("div.rounded-xl", { has: ap.getByRole("heading", { name: "Bankily", exact: true }) });
+  await bankily.getByLabel("Proposer ce moyen de paiement").check();
+  await bankily.getByRole("button", { name: "Enregistrer" }).click();
+  await ap.getByText(/compte marchand officiel avant/).waitFor();
+  await bankily.getByLabel("Numéro / compte marchand officiel").fill("COMPTE-TEST-E2E");
+  await bankily.getByLabel("Instructions affichées au client").fill("Instructions de test uniquement.");
+  await bankily.getByRole("button", { name: "Enregistrer" }).click();
+  await ap.getByText("Moyen de paiement enregistré.").first().waitFor();
+  const cod = ap.locator("div.rounded-xl", { has: ap.getByRole("heading", { name: "Paiement en espèces à la livraison", exact: true }) });
+  await cod.getByLabel("Proposer ce moyen de paiement").check();
+  await cod.getByRole("button", { name: "Enregistrer" }).click();
+  await cod.getByText("Moyen de paiement enregistré.").waitFor();
+  await ap.reload();
+  assert.equal(await ap.getByText("Actif", { exact: true }).count(), 2);
+});
+
 await step("Activation de la zone de livraison Nouakchott (frais 150 MRU)", async () => {
   await ap.goto(`${BASE}/admin/livraison`);
   const card = ap.locator("div.rounded-xl", { has: ap.getByRole("heading", { name: "Nouakchott", exact: true }) }).first();
@@ -462,6 +480,128 @@ await step("Tableau de bord : chiffre d'affaires facturé réel", async () => {
   assert.match(await ap.locator("body").innerText(), /factures émises [\d\u202f,]+ MRU − avoirs [\d\u202f,]+ MRU/);
 });
 
+// ---------------------------------------------------------------- Phase 4
+const driverEmail = `livreur-${id}@test.mr`;
+let driverPassword = "";
+let shipmentUrl = "";
+
+await step("Création d'un compte livreur", async () => {
+  await ap.goto(`${BASE}/admin/utilisateurs`);
+  const form = ap.locator("form", { hasText: "Créer le compte" });
+  await form.getByLabel("Nom complet").fill(`Livreur E2E ${id}`);
+  await form.getByLabel("E-mail").fill(driverEmail);
+  await form.getByLabel("Livreur").check();
+  await form.getByRole("button", { name: "Créer le compte" }).click();
+  const msg = await ap.getByText(/Mot de passe temporaire/).innerText();
+  driverPassword = msg.split(": ").pop().trim();
+  assert.ok(driverPassword.length >= 10);
+});
+
+await step("Affectation de la livraison (commande prête à expédier)", async () => {
+  await ap.goto(orderAdminUrl);
+  await ap.getByRole("link", { name: "Gérer la livraison" }).click();
+  await ap.waitForURL(/\/admin\/livraisons\/[0-9a-f-]+$/);
+  shipmentUrl = ap.url();
+  await ap.getByText("À encaisser : 8 650 MRU").waitFor();
+  await ap.getByLabel("Livreur", { exact: true }).selectOption({ label: `Livreur E2E ${id}` });
+  await ap.getByLabel("Date prévue").fill("2030-01-15");
+  await ap.getByRole("button", { name: "Affecter" }).click();
+  await ap.getByText("Livraison affectée.").waitFor();
+});
+
+const dctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+const dp = await dctx.newPage();
+dp.on("pageerror", (e) => errors.push(e.message));
+
+await step("Le livreur ne voit que ses livraisons, pas les commandes ni les clients", async () => {
+  await login(dp, driverEmail, driverPassword);
+  await dp.goto(`${BASE}/admin`);
+  await dp.waitForURL(/\/admin\/livraisons\/mes/);
+  await dp.getByRole("link", { name: orderNumber }).waitFor();
+  for (const url of ["/admin/commandes", "/admin/clients", "/admin/paiements", "/admin/livraisons"]) {
+    await dp.goto(`${BASE}${url}`);
+    assert.match(dp.url(), /acces-refuse/, url);
+  }
+});
+
+await step("Livreur : départ, livraison et déclaration des espèces encaissées", async () => {
+  await dp.goto(shipmentUrl);
+  await dp.getByRole("button", { name: "Départ en livraison" }).click();
+  await dp.getByRole("dialog").getByRole("button", { name: "Démarrer" }).click();
+  await dp.getByRole("button", { name: "Livraison effectuée" }).waitFor();
+  await dp.screenshot({ path: `${shots}/livreur-390.png`, fullPage: true });
+  await dp.getByRole("button", { name: "Livraison effectuée" }).click();
+  assert.equal(await dp.getByRole("dialog").getByLabel("Montant encaissé (MRU)").inputValue(), "8650");
+  await dp.getByRole("dialog").getByRole("button", { name: "Confirmer la livraison" }).click();
+  await dp.getByText("Livrée", { exact: true }).first().waitFor();
+  await page.goto(`${BASE}/compte/commandes/${orderNumber}`);
+  const text = await page.locator("main").innerText();
+  assert.match(text, /Livrée/);
+  assert.match(text, /En attente de vérification/); // espèces pas encore remises en caisse
+});
+
+await step("Comptable/admin : confirmation de la remise des espèces, facture réglée", async () => {
+  await ap.goto(`${BASE}/admin/paiements`);
+  const item = ap.locator("div.rounded-lg", { hasText: orderNumber }).first();
+  await item.getByRole("button", { name: "Confirmer" }).click();
+  await ap.getByRole("dialog").getByLabel("Note").fill("Espèces remises en caisse");
+  await ap.getByRole("dialog").getByRole("button", { name: "Confirmer le paiement" }).click();
+  // Le paiement quitte la liste « en attente de vérification ».
+  await ap.locator("div.rounded-lg", { hasText: orderNumber }).first().waitFor({ state: "detached" });
+  await page.goto(`${BASE}/compte/commandes/${orderNumber}`);
+  assert.match(await page.locator("main").innerText(), /Paiement confirmé/);
+  await ap.goto(invoiceAdminUrl);
+  await ap.getByText("Payée", { exact: true }).waitFor();
+});
+
+await step("Fiche de livraison imprimable", async () => {
+  await ap.goto(`${shipmentUrl}/fiche`);
+  await ap.getByText("FICHE DE LIVRAISON").waitFor();
+  await ap.getByText("Signature du client").waitFor();
+});
+
+let bankilyOrder = "";
+await step("Paiement Bankily : instructions, compte marchand, référence et justificatif", async () => {
+  await page.goto(proProductUrl);
+  await page.getByLabel("Quantité").fill("1");
+  await page.getByRole("button", { name: "Ajouter au panier" }).click();
+  await page.getByText("Ajouté au panier.").waitFor();
+  await page.goto(`${BASE}/commande`);
+  await page.getByRole("radio", { name: /Laboratoire —/ }).check();
+  await page.getByRole("radio", { name: /^Bankily/ }).check();
+  await page.getByRole("button", { name: "Valider la commande" }).click();
+  await page.waitForURL(/confirmee=1/);
+  bankilyOrder = page.url().match(/CMD-\d{4}-\d{4}/)[0];
+  await page.getByText("COMPTE-TEST-E2E").waitFor();
+  await page.getByLabel("Numéro de transaction").fill(`BK${id}`.toUpperCase());
+  await page.getByLabel(/Justificatif/).setInputFiles(path.resolve("public/brand/icon.png"));
+  await page.getByRole("button", { name: "Transmettre le paiement" }).click();
+  await page.getByText(/en cours de vérification par notre équipe/).waitFor();
+  assert.match(await page.locator("main").innerText(), /En attente de vérification/);
+});
+
+await step("Justificatif privé : visible par l'équipe, jamais public", async () => {
+  await ap.goto(`${BASE}/admin/paiements?q=${bankilyOrder}`);
+  const link = ap.getByRole("link", { name: "Voir le justificatif" }).first();
+  const href = await link.getAttribute("href");
+  assert.equal((await ap.request.get(`${BASE}${href}`)).headers()["content-type"], "image/png");
+  const anon = await browser.newContext();
+  assert.equal((await anon.request.get(`${BASE}${href}`)).status(), 401);
+  await anon.close();
+  assert.equal((await dctx.request.get(`${BASE}${href}`)).status(), 404); // le livreur n'y a pas accès
+});
+
+await step("Refus motivé du paiement, communiqué au client", async () => {
+  const item = ap.locator("div.rounded-lg", { hasText: bankilyOrder }).first();
+  await item.getByRole("button", { name: "Refuser" }).click();
+  await ap.getByRole("dialog").getByLabel(/Motif/).fill("Transaction introuvable sur le compte");
+  await ap.getByRole("dialog").getByRole("button", { name: "Refuser" }).click();
+  await ap.getByText("Refusé", { exact: true }).first().waitFor();
+  await page.goto(`${BASE}/compte/commandes/${bankilyOrder}`);
+  await page.getByText("Transaction introuvable sur le compte").waitFor();
+  await page.getByLabel("Numéro de transaction").waitFor(); // le client peut transmettre une nouvelle référence
+});
+
 await step("Formulaire de contact enregistré et visible en administration", async () => {
   await page.goto(`${BASE}/contact?sujet=Demande%20E2E%20${id}`);
   await page.getByLabel("Message").fill("Bonjour, je souhaite un devis pour 500 boîtes.");
@@ -488,7 +628,7 @@ await step("Journal d'audit : changements tracés", async () => {
 
 await step("Responsive : pas de défilement horizontal (375 / 768 / 1280 px)", async () => {
   for (const [w, h] of [[375, 812], [768, 1024], [1280, 900]]) {
-    for (const [name, p, url] of [["accueil", page, "/"], ["catalogue", page, "/catalogue"], ["admin", ap, "/admin/produits"], ["stock", ap, "/admin/stock"], ["pro", page, "/espace-pro"], ["panier", page, "/panier"], ["commandes-admin", ap, "/admin/commandes?statut=all"], ["factures-admin", ap, "/admin/factures"]]) {
+    for (const [name, p, url] of [["accueil", page, "/"], ["catalogue", page, "/catalogue"], ["admin", ap, "/admin/produits"], ["stock", ap, "/admin/stock"], ["pro", page, "/espace-pro"], ["panier", page, "/panier"], ["commandes-admin", ap, "/admin/commandes?statut=all"], ["factures-admin", ap, "/admin/factures"], ["paiements-admin", ap, "/admin/paiements?statut=all"], ["livraisons-admin", ap, "/admin/livraisons?statut=all"]]) {
       await p.setViewportSize({ width: w, height: h });
       await p.goto(BASE + url);
       const overflow = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -499,7 +639,7 @@ await step("Responsive : pas de défilement horizontal (375 / 768 / 1280 px)", a
 });
 
 await step("Aucune erreur JavaScript côté navigateur", async () => {
-  assert.deepEqual(errors, []);
+  assert.deepEqual(errors, [], errors.join(" | "));
 });
 
 await browser.close();

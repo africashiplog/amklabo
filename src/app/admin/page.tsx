@@ -9,6 +9,8 @@ import { getDashboardStats, getSalesStats, PERIODS } from "@/server/services/das
 import { formatMRU } from "@/lib/money";
 import { ORDER_STATUS } from "@/server/services/orders";
 import { getStockAlertCounts } from "@/server/services/stock";
+import { countPendingPayments } from "@/server/services/payments";
+import { query } from "@/server/db";
 
 function Stat({ label, value, href, tone = "blue", sub }: { label: string; value: number; href?: string; tone?: "blue" | "green" | "amber"; sub?: string }) {
   const color = { blue: "text-brand-800", green: "text-leaf-700", amber: "text-amber-700" }[tone];
@@ -23,9 +25,7 @@ function Stat({ label, value, href, tone = "blue", sub }: { label: string; value
 }
 
 const UPCOMING = [
-  ["Paiements à vérifier", "Phase 4 — paiements"],
-  ["Livraisons en attente / en cours", "Phase 4 — livraisons"],
-  ["Rapports détaillés et exports CSV", "Phase 5 — rapports"],
+  ["Rapports détaillés (produits, catégories, retours) et exports CSV", "Phase 5 — rapports"],
 ] as const;
 
 function Money({ label, value, sub, href }: { label: string; value: number; sub?: string; href?: string }) {
@@ -41,7 +41,12 @@ function Money({ label, value, sub, href }: { label: string; value: number; sub?
 
 export default async function AdminDashboard({ searchParams }: { searchParams: Promise<{ periode?: string }> }) {
   const actor = await requireActorPage("/admin");
-  if (!can(actor.roles, "dashboard.view")) redirect("/acces-refuse");
+  if (!can(actor.roles, "dashboard.view")) redirect(can(actor.roles, "deliveries.own") ? "/admin/livraisons/mes" : "/acces-refuse");
+  const [pendingPayments, deliveries] = await Promise.all([
+    countPendingPayments(actor),
+    can(actor.roles, "deliveries.manage") ? query<{ status: string; n: number }>("SELECT status, count(*)::int AS n FROM shipments WHERE status IN ('pending', 'assigned', 'in_transit', 'failed') GROUP BY status") : Promise.resolve(null),
+  ]);
+  const dl = (k: string) => deliveries?.find((d) => d.status === k)?.n ?? 0;
   const sales = await getSalesStats(actor, Number((await searchParams).periode) || 30);
   const [{ counts: c, recentCustomers, recentActivity }, stock] = await Promise.all([getDashboardStats(actor), getStockAlertCounts(actor)]);
   const stockLink = can(actor.roles, "stock.manage");
@@ -57,7 +62,7 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
       <h2 className="mb-3 font-semibold text-slate-900">Ventes — {PERIODS[String(sales.days) as keyof typeof PERIODS].toLowerCase()}</h2>
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {sales.revenue && <Money label="Chiffre d'affaires facturé" value={sales.revenue.invoiced - sales.revenue.credited} sub={`factures émises ${formatMRU(sales.revenue.invoiced)} − avoirs ${formatMRU(sales.revenue.credited)}`} href="/admin/factures" />}
-        {sales.revenue && <Money label="Factures impayées" value={sales.revenue.unpaid_minor} sub={`${sales.revenue.unpaid_count} facture(s) — règlements : Phase 4`} href="/admin/factures?impayees=1" />}
+        {sales.revenue && <Money label="Factures impayées" value={sales.revenue.unpaid_minor} sub={`${sales.revenue.unpaid_count} facture(s)`} href="/admin/factures?impayees=1" />}
         <Stat label="Commandes" value={sales.orders.total} sub="hors annulées" href="/admin/commandes?statut=all" />
         <Stat label="Commandes à traiter" value={sales.orders.to_process} href="/admin/commandes" tone={sales.orders.to_process ? "amber" : "green"} />
         <Money label="Commandes au détail" value={sales.orders.retail_minor} sub={`${sales.orders.retail} commande(s)`} />
@@ -65,6 +70,14 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
         <Stat label="Demandes d'annulation" value={sales.orders.cancel_requests} href="/admin/commandes?statut=all&signal=cancel_request" tone={sales.orders.cancel_requests ? "amber" : "blue"} />
         <Stat label="Retours en cours" value={sales.orders.returns_open} href="/admin/commandes?statut=all&signal=return" tone={sales.orders.returns_open ? "amber" : "blue"} />
       </div>
+      {(pendingPayments !== null || deliveries) && (
+        <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {pendingPayments !== null && <Stat label="Paiements à vérifier" value={pendingPayments} href="/admin/paiements" tone={pendingPayments ? "amber" : "green"} />}
+          {deliveries && <Stat label="Livraisons à planifier" value={dl("pending") + dl("failed")} href="/admin/livraisons" tone={dl("pending") + dl("failed") ? "amber" : "green"} sub={`dont ${dl("failed")} échec(s)`} />}
+          {deliveries && <Stat label="Livraisons affectées" value={dl("assigned")} href="/admin/livraisons?statut=assigned" />}
+          {deliveries && <Stat label="Livraisons en cours" value={dl("in_transit")} href="/admin/livraisons?statut=in_transit" />}
+        </div>
+      )}
       <p className="mt-2 text-xs text-slate-500">Le chiffre d&apos;affaires est le montant facturé (TTC si une taxe est configurée), et non un bénéfice.</p>
 
       <h2 className="mb-3 mt-8 font-semibold text-slate-900">Catalogue et clients</h2>

@@ -14,6 +14,9 @@ const NAV: { href: string; label: string; permission: Permission }[] = [
   { href: "/admin", label: "Tableau de bord", permission: "dashboard.view" },
   { href: "/admin/commandes", label: "Commandes", permission: "orders.read" },
   { href: "/admin/factures", label: "Factures et avoirs", permission: "invoices.read" },
+  { href: "/admin/paiements", label: "Paiements", permission: "payments.view" },
+  { href: "/admin/livraisons", label: "Livraisons", permission: "deliveries.manage" },
+  { href: "/admin/livraisons/mes", label: "Mes livraisons", permission: "deliveries.own" },
   { href: "/admin/produits", label: "Produits", permission: "catalog.manage" },
   { href: "/admin/categories", label: "Catégories", permission: "catalog.manage" },
   { href: "/admin/promotions", label: "Promotions", permission: "pricing.manage" },
@@ -25,6 +28,7 @@ const NAV: { href: string; label: string; permission: Permission }[] = [
   { href: "/admin/professionnels", label: "Comptes professionnels", permission: "customers.read" },
   { href: "/admin/messages", label: "Messages", permission: "messages.manage" },
   { href: "/admin/livraison", label: "Zones de livraison", permission: "settings.manage" },
+  { href: "/admin/moyens-de-paiement", label: "Moyens de paiement", permission: "settings.manage" },
   { href: "/admin/pages", label: "Pages de contenu", permission: "settings.manage" },
   { href: "/admin/parametres", label: "Paramètres du magasin", permission: "settings.manage" },
   { href: "/admin/utilisateurs", label: "Utilisateurs et rôles", permission: "users.manage" },
@@ -39,10 +43,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[16rem_1fr]">
-      <aside className="border-b border-slate-200 bg-white lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-e">
+      <aside className="border-b border-slate-200 bg-white print:hidden lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-e">
         <div className="flex items-center justify-between gap-2 p-4 lg:block">
           <Link href="/admin"><Logo logoPath={settings.logo_path} name={settings.store_name} className="h-10 lg:h-12" /></Link>
-          <p className="text-xs font-semibold uppercase tracking-wider text-leaf-700 lg:mt-2">Administration</p>
+          <div className="flex items-center gap-3 lg:block">
+            <p className="text-xs font-semibold uppercase tracking-wider text-leaf-700 lg:mt-2">Administration</p>
+            <form action={logoutAction} className="lg:hidden"><button className="text-xs text-slate-600 underline">Déconnexion</button></form>
+          </div>
         </div>
         <nav aria-label="Administration" className="flex gap-1 overflow-x-auto px-2 pb-3 lg:block lg:space-y-0.5 lg:overflow-visible">
           {links.map((l) => (

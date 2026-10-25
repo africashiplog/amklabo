@@ -187,7 +187,9 @@ export function shippingFee(zone: Zone, subtotalMinor: number) {
 // ---------------------------------------------------------------------------
 // Validation de commande
 // ---------------------------------------------------------------------------
-export type PlaceOrderInput = { addressId: string; note?: string | null; idempotencyKey: string; expectedTotalMinor?: number | null };
+export type PlaceOrderInput = {
+  addressId: string; paymentMethodCode: string; note?: string | null; idempotencyKey: string; expectedTotalMinor?: number | null;
+};
 
 export async function placeOrder(actor: Actor | null, input: PlaceOrderInput) {
   if (!/^[A-Za-z0-9_-]{16,80}$/.test(input.idempotencyKey ?? "")) throw new UserError("Requête invalide. Rechargez la page.");
@@ -219,6 +221,11 @@ export async function placeOrder(actor: Actor | null, input: PlaceOrderInput) {
       : null;
     if (!zone) throw new UserError("Cette adresse n'est rattachée à aucune zone de livraison desservie. Modifiez-la ou choisissez-en une autre.", { addressId: "Zone non desservie" });
 
+    const method = await queryOne<{ code: string; name: string }>(
+      "SELECT code, name FROM payment_methods WHERE code = $1 AND is_active", [input.paymentMethodCode ?? ""], db,
+    );
+    if (!method) throw new UserError("Choisissez un moyen de paiement disponible.", { paymentMethodCode: "Moyen de paiement requis" });
+
     const shipping = shippingFee(zone, cart.subtotalMinor);
     const total = cart.subtotalMinor + shipping;
     if (input.expectedTotalMinor != null && input.expectedTotalMinor !== total) {
@@ -229,11 +236,11 @@ export async function placeOrder(actor: Actor | null, input: PlaceOrderInput) {
     const order = await queryOne<{ id: string }>(
       `INSERT INTO orders (number, customer_id, customer_name, customer_email, customer_phone, customer_type, business_name,
                            ship_recipient, ship_phone, ship_city, ship_district, ship_line1, ship_landmark, zone_id, zone_name,
-                           subtotal_minor, discount_minor, shipping_minor, total_minor, customer_note, idempotency_key)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING id`,
+                           subtotal_minor, discount_minor, shipping_minor, total_minor, customer_note, idempotency_key, payment_method_code)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING id`,
       [number, c.id, c.full_name, c.email, c.phone, ctx.isBusiness ? "business" : "retail", c.business_name,
        address.recipient, address.phone, address.city, address.district, address.line1, address.landmark, zone.id, zone.name,
-       cart.subtotalMinor, cart.discountMinor, shipping, total, note, input.idempotencyKey],
+       cart.subtotalMinor, cart.discountMinor, shipping, total, note, input.idempotencyKey, method.code],
       db,
     );
     const orderId = order!.id;
@@ -261,7 +268,7 @@ export async function placeOrder(actor: Actor | null, input: PlaceOrderInput) {
     await db.query("DELETE FROM cart_items WHERE customer_id = $1", [c.id]);
     await audit(actor, "order.place", "order", orderId, { after: { number, total, lines: cart.lines.length } }, db);
     await notify(db, c.user_id, `Commande ${number} reçue`,
-      `Montant : ${formatMRU(total)}. Notre équipe va la confirmer et vous indiquer les modalités de paiement.`, `/compte/commandes/${number}`);
+      `Montant : ${formatMRU(total)} — paiement : ${method.name}. Notre équipe va la confirmer.`, `/compte/commandes/${number}`);
     return { id: orderId, number, duplicate: false };
   });
 }
@@ -306,6 +313,40 @@ async function consumeReservations(db: PoolClient, actor: Actor, order: LockedOr
     await db.query("UPDATE inventory_reservations SET status = 'consumed', resolved_at = now() WHERE id = $1", [r.id]);
   }
   await db.query("UPDATE orders SET stock_consumed_at = now() WHERE id = $1", [order.id]);
+  // La livraison est créée quand la commande est prête à expédier.
+  const ship = await queryOne<{ id: string }>(
+    "INSERT INTO shipments (order_id) VALUES ($1) ON CONFLICT (order_id) DO NOTHING RETURNING id", [order.id], db,
+  );
+  if (ship) {
+    await db.query("INSERT INTO shipment_events (shipment_id, status, note, actor_id, actor_name) VALUES ($1, 'pending', 'Commande prête à expédier', $2, $3)",
+      [ship.id, actor.id, actor.fullName]);
+  }
+}
+
+/** Met la livraison en cohérence quand l'équipe fait avancer la commande directement. */
+async function syncShipment(db: PoolClient, actor: Actor, orderId: string, to: "in_transit" | "delivered", note: string | null) {
+  const s = await queryOne<{ id: string; status: string }>("SELECT id, status FROM shipments WHERE order_id = $1 FOR UPDATE", [orderId], db);
+  if (!s || s.status === to) return;
+  await db.query(
+    `UPDATE shipments SET status = $2::delivery_status, delivered_at = CASE WHEN $2::delivery_status = 'delivered' THEN now() ELSE delivered_at END WHERE id = $1`,
+    [s.id, to],
+  );
+  await db.query("INSERT INTO shipment_events (shipment_id, status, note, actor_id, actor_name) VALUES ($1,$2,$3,$4,$5)",
+    [s.id, to, note ?? "Mise à jour depuis la commande", actor.id, actor.fullName]);
+}
+
+/**
+ * Avance la commande depuis le module livraison (départ, livraison effectuée).
+ * Appelée dans la transaction de la livraison.
+ */
+export async function advanceOrderForDelivery(db: PoolClient, actor: Actor, orderId: string, to: "out_for_delivery" | "delivered", note: string | null) {
+  const order = await lockOrder(db, orderId);
+  if (order.status === to) return;
+  if (!TRANSITIONS[order.status]?.includes(to)) {
+    throw new UserError(`La commande est « ${ORDER_STATUS[order.status]} » : passage à « ${ORDER_STATUS[to]} » impossible.`);
+  }
+  if (to === "delivered") await db.query("UPDATE orders SET delivered_at = now() WHERE id = $1", [orderId]);
+  await recordStatus(db, actor, order, to, note);
 }
 
 async function recordStatus(db: PoolClient, actor: Actor, order: LockedOrder, to: OrderStatus, note: string | null) {
@@ -349,7 +390,11 @@ export async function changeOrderStatus(actor: Actor | null, orderId: string, to
       return;
     }
     if (to === "ready_to_ship") await consumeReservations(db, actor, order);
-    if (to === "delivered") await db.query("UPDATE orders SET delivered_at = now() WHERE id = $1", [order.id]);
+    if (to === "out_for_delivery") await syncShipment(db, actor, order.id, "in_transit", text);
+    if (to === "delivered") {
+      await db.query("UPDATE orders SET delivered_at = now() WHERE id = $1", [order.id]);
+      await syncShipment(db, actor, order.id, "delivered", text);
+    }
     await recordStatus(db, actor, order, to, text);
   });
 }
@@ -505,7 +550,7 @@ export type OrderDetail = OrderRow & {
   customer_email: string | null; customer_phone: string | null; ship_recipient: string; ship_phone: string; ship_city: string;
   ship_district: string | null; ship_line1: string; ship_landmark: string | null; zone_name: string; subtotal_minor: number;
   discount_minor: number; shipping_minor: number; customer_note: string | null; cancel_reason: string | null;
-  cancel_request_reason: string | null; stock_consumed_at: Date | null; delivered_at: Date | null;
+  cancel_request_reason: string | null; stock_consumed_at: Date | null; delivered_at: Date | null; payment_method_code: string | null;
 };
 
 async function orderDetail(where: string, args: unknown[]) {

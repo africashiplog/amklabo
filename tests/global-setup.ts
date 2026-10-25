@@ -17,4 +17,9 @@ export default async function setup() {
   const childEnv = { ...process.env, DATABASE_OWNER_URL: owner, APP_DB_PASSWORD: env.APP_DB_PASSWORD };
   execSync("npx tsx scripts/migrate.ts", { env: childEnv, stdio: "pipe" });
   execSync("npx tsx scripts/seed.ts", { env: childEnv, stdio: "pipe" });
+  // Les tests de commande utilisent le paiement à la livraison.
+  const c2 = new Client({ connectionString: owner });
+  await c2.connect();
+  await c2.query("UPDATE payment_methods SET is_active = true WHERE code = 'cash_on_delivery'");
+  await c2.end();
 }

@@ -9,6 +9,11 @@ import { requirePermissionPage } from "@/server/current";
 import { can } from "@/server/permissions";
 import { INVOICE_STATUS } from "@/server/services/invoices";
 import { adminGetOrder, ORDER_STATUS, TRANSITIONS } from "@/server/services/orders";
+import { DeliveryBadge } from "@/components/delivery-badge";
+import { PaymentPanel } from "@/components/payment-panel";
+import { getShipmentForOrder } from "@/server/services/deliveries";
+import { adminListMethods, listPaymentsFor, orderAmountDue } from "@/server/services/payments";
+import { query as dbQuery } from "@/server/db";
 import {
   changeOrderStatusAction, completeReturnAction, createInvoiceFromOrderAction, decideReturnAction, rejectCancelRequestAction,
 } from "../../order-actions";
@@ -16,7 +21,8 @@ import {
 const HINT: Partial<Record<string, string>> = {
   ready_to_ship: "Les quantités réservées sortent du stock (mouvement « Vente ») : cette étape n'est plus annulable.",
   cancelled: "Les quantités réservées sont libérées. Le client est notifié.",
-  delivered: "Le délai de demande de retour démarre.",
+  out_for_delivery: "La livraison associée passe « En cours ». Préférez la gestion depuis la page Livraison (affectation du livreur, encaissement).",
+  delivered: "Le délai de demande de retour démarre. Pour un paiement à la livraison, enregistrez l'encaissement depuis la page Livraison.",
 };
 
 export default async function AdminOrder({ params }: { params: Promise<{ id: string }> }) {
@@ -26,6 +32,14 @@ export default async function AdminOrder({ params }: { params: Promise<{ id: str
   if (!data) notFound();
   const { order: o, items, history, returns, invoices, reservations, canManage } = data;
   const next = TRANSITIONS[o.status];
+  const canPayments = can(actor.roles, "payments.view");
+  const [payments, due, shipment, methods] = await Promise.all([
+    canPayments ? listPaymentsFor(actor, { orderId: o.id }) : Promise.resolve([]),
+    orderAmountDue(undefined, o.id),
+    getShipmentForOrder(o.id),
+    can(actor.roles, "settings.manage") ? adminListMethods(actor) : dbQuery<import("@/server/services/payments").PaymentMethod>("SELECT * FROM payment_methods ORDER BY sort_order"),
+  ]);
+  const methodName = methods.find((m) => m.code === o.payment_method_code)?.name ?? "—";
   const canInvoice = can(actor.roles, "invoices.manage") && !["new", "pending_confirmation", "cancelled"].includes(o.status)
     && !invoices.some((i) => i.kind === "invoice" && i.status !== "cancelled");
 
@@ -66,6 +80,11 @@ export default async function AdminOrder({ params }: { params: Promise<{ id: str
               ))}
             </tbody>
           </Table>
+
+          {canPayments && (
+            <PaymentPanel target={{ orderId: o.id }} payments={payments} methods={methods} dueMinor={due}
+              canVerify={can(actor.roles, "payments.verify")} canRefund={can(actor.roles, "payments.refund")} />
+          )}
 
           <Card className="p-5">
             <h2 className="mb-2 font-semibold">Stock</h2>
@@ -133,6 +152,14 @@ export default async function AdminOrder({ params }: { params: Promise<{ id: str
               ))}
             </Card>
           )}
+          <Card className="space-y-2 p-5 text-sm">
+            <h2 className="font-semibold">Paiement et livraison</h2>
+            <p>Moyen choisi : <strong>{methodName}</strong></p>
+            {shipment ? (
+              <p>Livraison : <DeliveryBadge status={shipment.status} />{" "}
+                {(can(actor.roles, "deliveries.manage")) && <Link href={`/admin/livraisons/${shipment.id}`} className="font-semibold text-brand-700 underline">Gérer la livraison</Link>}</p>
+            ) : <p className="text-slate-600">La livraison sera créée lorsque la commande sera prête à expédier.</p>}
+          </Card>
           <Card className="space-y-2 p-5 text-sm">
             <h2 className="font-semibold">Client</h2>
             <p><Link href={`/admin/clients/${o.customer_id}`} className="font-medium text-brand-700 underline">{o.business_name ?? o.customer_name}</Link> · {o.customer_type === "business" ? "Professionnel" : "Particulier"}</p>

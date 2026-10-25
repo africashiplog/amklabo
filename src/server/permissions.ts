@@ -33,6 +33,11 @@ export const PERMISSIONS = [
   "invoices.manage",    // brouillons, émission, annulation, avoirs
   "invoices.delete",    // suppression des brouillons (distincte de la modification)
   "reports.view",       // chiffre d'affaires
+  "payments.view",
+  "payments.verify",    // confirmer / refuser un paiement, enregistrer un règlement
+  "payments.refund",
+  "deliveries.manage",  // affectation des livreurs, suivi de toutes les livraisons
+  "deliveries.own",     // livreur : uniquement ses livraisons
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -43,9 +48,10 @@ export type Permission = (typeof PERMISSIONS)[number];
 const MATRIX: Record<Role, Permission[]> = {
   admin: [...PERMISSIONS],
   stock_manager: ["admin.access", "dashboard.view", "catalog.manage", "stock.manage", "suppliers.manage", "stock.view_costs", "orders.read"],
-  order_manager: ["admin.access", "dashboard.view", "customers.read", "customers.manage", "messages.manage", "orders.read", "orders.manage", "invoices.read"],
-  accountant: ["admin.access", "dashboard.view", "customers.read", "stock.view_costs", "orders.read", "invoices.read", "invoices.manage", "reports.view"],
-  delivery: ["admin.access"],
+  order_manager: ["admin.access", "dashboard.view", "customers.read", "customers.manage", "messages.manage", "orders.read", "orders.manage", "invoices.read", "payments.view", "deliveries.manage"],
+  accountant: ["admin.access", "dashboard.view", "customers.read", "stock.view_costs", "orders.read", "invoices.read", "invoices.manage", "reports.view", "payments.view", "payments.verify", "payments.refund"],
+  // Le livreur n'accède qu'aux livraisons qui lui sont attribuées.
+  delivery: ["admin.access", "deliveries.own"],
   customer_retail: [],
   customer_business: [],
 };

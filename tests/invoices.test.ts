@@ -26,7 +26,7 @@ async function confirmedOrder() {
   await saveMyAddress(c, null, { label: "Bureau", recipient: "Client Facture", phone: "+222 22 00 00 02", city: "Nouakchott", line1: "Rue 2", zoneId, isDefault: true });
   const addressId = (await pool().query("SELECT a.id FROM addresses a JOIN customers c ON c.id = a.customer_id WHERE c.user_id = $1", [c.id])).rows[0].id;
   await addToCart(c, productId, 4);
-  const { id: orderId } = await placeOrder(c, { addressId, idempotencyKey: randomUUID().replace(/-/g, "") });
+  const { id: orderId } = await placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: randomUUID().replace(/-/g, "") });
   return { admin, c, orderId };
 }
 

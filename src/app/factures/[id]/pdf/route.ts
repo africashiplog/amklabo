@@ -10,7 +10,10 @@ import { getStoreSettings } from "@/server/services/settings";
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const actor = await getActor();
   if (!actor) return new Response("Veuillez vous connecter.", { status: 401 });
-  const data = await getInvoiceForViewer(actor, (await params).id).catch(() => null);
+  const data = await getInvoiceForViewer(actor, (await params).id).catch((err: unknown) => {
+    console.error("[facture pdf]", err instanceof Error ? err.message : err);
+    return null;
+  });
   if (!data) return new Response("Document introuvable.", { status: 404 });
   const s = await getStoreSettings();
   const fallback: SellerSnapshot = { ...s, tax_label: (s as { tax_label?: string }).tax_label ?? "TVA" };

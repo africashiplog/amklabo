@@ -48,7 +48,7 @@ describe("panier et validation", () => {
     const cart = await getMyCart(c);
     expect(cart.subtotalMinor).toBe(270000);
     expect(cart.discountMinor).toBe(30000);
-    const { number } = await placeOrder(c, { addressId, idempotencyKey: key() });
+    const { number } = await placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key() });
     expect(number).toMatch(/^CMD-\d{4}-\d{4}$/);
     const o = (await getMyOrder(c, number))!;
     expect([o.order.subtotal_minor, o.order.shipping_minor, o.order.total_minor]).toEqual([270000, 20000, 290000]);
@@ -69,7 +69,7 @@ describe("panier et validation", () => {
     const zoneId = await zone(admin, "300", "2000");
     const { c, addressId } = await customerWithAddress(zoneId);
     await addToCart(c, productId, 2);
-    const { number } = await placeOrder(c, { addressId, idempotencyKey: key() });
+    const { number } = await placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key() });
     expect((await getMyOrder(c, number))!.order.shipping_minor).toBe(0);
   });
 
@@ -78,7 +78,7 @@ describe("panier et validation", () => {
     const { c, addressId } = await customerWithAddress(zoneId);
     await addToCart(c, productId, 1);
     const k = key();
-    const [a, b] = await Promise.all([placeOrder(c, { addressId, idempotencyKey: k }), placeOrder(c, { addressId, idempotencyKey: k })]);
+    const [a, b] = await Promise.all([placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: k }), placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: k })]);
     expect(a.number).toBe(b.number);
     const { rows } = await pool().query("SELECT count(*)::int AS n FROM orders WHERE idempotency_key = $1", [k]);
     expect(rows[0].n).toBe(1);
@@ -89,7 +89,7 @@ describe("panier et validation", () => {
     const { productId, zoneId } = await setup(5);
     const buyers = await Promise.all(Array.from({ length: 4 }, () => customerWithAddress(zoneId)));
     for (const b of buyers) await addToCart(b.c, productId, 2);
-    const results = await Promise.allSettled(buyers.map((b) => placeOrder(b.c, { addressId: b.addressId, idempotencyKey: key() })));
+    const results = await Promise.allSettled(buyers.map((b) => placeOrder(b.c, { paymentMethodCode: "cash_on_delivery", addressId: b.addressId, idempotencyKey: key() })));
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(2);
     expect(results.filter((r) => r.status === "rejected").every((r) => (r as PromiseRejectedResult).reason instanceof UserError)).toBe(true);
     expect((await getAvailability([productId])).get(productId)).toBe(1);
@@ -98,16 +98,16 @@ describe("panier et validation", () => {
   it("refuse : panier vide, stock insuffisant, produit non publié, zone non desservie, total modifié", async () => {
     const { admin, productId, zoneId } = await setup(2);
     const { c, addressId } = await customerWithAddress(zoneId);
-    await expect(placeOrder(c, { addressId, idempotencyKey: key() })).rejects.toThrow(/vide/);
+    await expect(placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key() })).rejects.toThrow(/vide/);
     await addToCart(c, productId, 3);
-    await expect(placeOrder(c, { addressId, idempotencyKey: key() })).rejects.toThrow(/insuffisant/);
+    await expect(placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key() })).rejects.toThrow(/insuffisant/);
     await pool().query("UPDATE cart_items SET quantity = 1 FROM customers WHERE customers.id = cart_items.customer_id AND customers.user_id = $1", [c.id]);
-    await expect(placeOrder(c, { addressId, idempotencyKey: key(), expectedTotalMinor: 1 })).rejects.toThrow(/a changé/);
+    await expect(placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key(), expectedTotalMinor: 1 })).rejects.toThrow(/a changé/);
     await pool().query("UPDATE delivery_zones SET is_active = false WHERE id = $1", [zoneId]);
-    await expect(placeOrder(c, { addressId, idempotencyKey: key() })).rejects.toThrow(/zone/);
+    await expect(placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key() })).rejects.toThrow(/zone/);
     await pool().query("UPDATE delivery_zones SET is_active = true WHERE id = $1", [zoneId]);
     await pool().query("UPDATE products SET status = 'unavailable' WHERE id = $1", [productId]);
-    await expect(placeOrder(c, { addressId, idempotencyKey: key() })).rejects.toThrow(/plus disponible/);
+    await expect(placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key() })).rejects.toThrow(/plus disponible/);
     await expect(addToCart(c, productId, 1)).rejects.toThrow(/pas disponible/);
     void admin;
   });
@@ -121,7 +121,7 @@ describe("panier et validation", () => {
     const { admin, productId, zoneId } = await setup(5);
     const { c, addressId } = await customerWithAddress(zoneId);
     await addToCart(c, productId, 4);
-    await placeOrder(c, { addressId, idempotencyKey: key() });
+    await placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key() });
     await expect(recordExit(admin, { productId, lotId: null, type: "loss", quantity: "2", reason: "Casse" })).rejects.toThrow(/insuffisant/);
     await recordExit(admin, { productId, lotId: null, type: "loss", quantity: "1", reason: "Casse" });
     await expect(pool().query("UPDATE stock_lots SET qty_on_hand = 3 WHERE product_id = $1", [productId])).rejects.toThrow(/check/i);
@@ -133,7 +133,7 @@ describe("cycle de vie de la commande", () => {
     const { admin, productId, zoneId } = await setup(10);
     const { c, addressId } = await customerWithAddress(zoneId);
     await addToCart(c, productId, 4);
-    const { id, number } = await placeOrder(c, { addressId, idempotencyKey: key() });
+    const { id, number } = await placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key() });
     await expect(changeOrderStatus(admin, id, "delivered", null)).rejects.toThrow(/non autorisé/);
     for (const s of ["confirmed", "preparing", "ready_to_ship"] as const) await changeOrderStatus(admin, id, s, null);
     const st = (await getProductStock(admin, productId))!;
@@ -154,7 +154,7 @@ describe("cycle de vie de la commande", () => {
     const { productId, zoneId } = await setup(5);
     const { c, addressId } = await customerWithAddress(zoneId);
     await addToCart(c, productId, 5);
-    const { number } = await placeOrder(c, { addressId, idempotencyKey: key() });
+    const { number } = await placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key() });
     expect((await getAvailability([productId])).get(productId)).toBe(0);
     expect(await cancelMyOrder(c, number, "Erreur de quantité")).toBe("cancelled");
     expect((await getAvailability([productId])).get(productId)).toBe(5);
@@ -165,7 +165,7 @@ describe("cycle de vie de la commande", () => {
     const { admin, productId, zoneId } = await setup(5);
     const { c, addressId } = await customerWithAddress(zoneId);
     await addToCart(c, productId, 1);
-    const { id, number } = await placeOrder(c, { addressId, idempotencyKey: key() });
+    const { id, number } = await placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key() });
     await changeOrderStatus(admin, id, "confirmed", null);
     expect(await cancelMyOrder(c, number, "Plus besoin")).toBe("requested");
     await expect(cancelMyOrder(c, number, "Encore")).rejects.toThrow(/déjà en cours/);
@@ -180,17 +180,17 @@ describe("cycle de vie de la commande", () => {
     const a = await customerWithAddress(zoneId);
     const b = await customerWithAddress(zoneId);
     await addToCart(a.c, productId, 1);
-    const { number } = await placeOrder(a.c, { addressId: a.addressId, idempotencyKey: key() });
+    const { number } = await placeOrder(a.c, { paymentMethodCode: "cash_on_delivery", addressId: a.addressId, idempotencyKey: key() });
     expect(await getMyOrder(b.c, number)).toBeNull();
     await expect(cancelMyOrder(b.c, number, "Pirate")).rejects.toThrow(/introuvable/);
-    await expect(placeOrder(b.c, { addressId: a.addressId, idempotencyKey: key() })).rejects.toThrow();
+    await expect(placeOrder(b.c, { paymentMethodCode: "cash_on_delivery", addressId: a.addressId, idempotencyKey: key() })).rejects.toThrow();
   });
 
   it("seuls les gestionnaires des commandes et administrateurs changent les statuts", async () => {
     const { productId, zoneId } = await setup(5);
     const { c, addressId } = await customerWithAddress(zoneId);
     await addToCart(c, productId, 1);
-    const { id } = await placeOrder(c, { addressId, idempotencyKey: key() });
+    const { id } = await placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key() });
     for (const r of ["stock_manager", "accountant", "delivery"] as const) {
       await expect(changeOrderStatus(await makeActor([r]), id, "confirmed", null)).rejects.toThrow(ForbiddenError);
     }
@@ -202,7 +202,7 @@ describe("cycle de vie de la commande", () => {
     const { admin, productId, zoneId } = await setup(5);
     const { c, addressId } = await customerWithAddress(zoneId);
     await addToCart(c, productId, 2);
-    const { id, number } = await placeOrder(c, { addressId, idempotencyKey: key() });
+    const { id, number } = await placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key() });
     await expect(requestReturn(c, number, "Produit abîmé")).rejects.toThrow(/livrée/);
     for (const s of ["confirmed", "preparing", "ready_to_ship", "out_for_delivery", "delivered"] as const) await changeOrderStatus(admin, id, s, null);
     await requestReturn(c, number, "Boîte endommagée à la livraison");
@@ -218,7 +218,7 @@ describe("cycle de vie de la commande", () => {
     const { productId, zoneId } = await setup(5);
     const { c, addressId } = await customerWithAddress(zoneId);
     await addToCart(c, productId, 2);
-    const { number } = await placeOrder(c, { addressId, idempotencyKey: key() });
+    const { number } = await placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key() });
     expect(await reorder(c, number)).toEqual({ added: 1, skipped: 0 });
     expect((await getMyCart(c)).lines[0].quantity).toBe(2);
   });
@@ -227,7 +227,7 @@ describe("cycle de vie de la commande", () => {
     const { productId, zoneId } = await setup(5);
     const { c, addressId } = await customerWithAddress(zoneId);
     await addToCart(c, productId, 1);
-    await placeOrder(c, { addressId, idempotencyKey: key() });
+    await placeOrder(c, { paymentMethodCode: "cash_on_delivery", addressId, idempotencyKey: key() });
     await expect(pool().query("DELETE FROM products WHERE id = $1", [productId])).rejects.toThrow(/foreign key/);
   });
 });

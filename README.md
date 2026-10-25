@@ -1,7 +1,7 @@
 # AMKLABO — Medical & Laboratory
 
 Plateforme e-commerce (détail et gros) de matériel médical et de laboratoire pour la Mauritanie.
-**État : Phases 1 (fondation), 2 (clients, prix, stock) et 3 (commandes, factures) terminées.**
+**État : Phases 1 à 4 terminées (fondation ; clients, prix, stock ; commandes, factures ; paiements, livraisons).**
 
 ## Architecture
 
@@ -71,6 +71,24 @@ Tous les prix sont calculés côté serveur ; un prix venant du navigateur n'est
 - PDF (pdfkit) avec le logo officiel, téléchargeable par le personnel autorisé et par le client propriétaire uniquement. Polices standard : caractères latins uniquement (l'arabe nécessitera l'intégration d'une police).
 - Taxe : les prix saisis sont des prix finaux. Si un taux est configuré, la part incluse est affichée. Par défaut : aucune taxe, à valider.
 
+### Paiements (`src/server/services/payments.ts`)
+**Aucune intégration officielle (API) d'opérateur n'est implémentée** : aucune documentation ni compte marchand n'a été fourni. Les six moyens (espèces à la livraison, Bankily, Masrivi, Sedad, Bimbank, Click) sont créés **désactivés** ; un moyen électronique ne peut pas être activé sans compte marchand officiel.
+- **Électronique, procédure manuelle :**
+  1. Le client voit les instructions, le compte marchand et le montant.
+  2. Il transmet la référence de transaction, avec un justificatif facultatif (PNG ou JPEG, stocké hors du dossier public et servi uniquement au personnel et à son auteur).
+  3. Le paiement est « en attente de vérification ».
+  4. Un vérificateur (comptable ou administrateur) confirme le montant réellement reçu, ou refuse avec un motif. Son identité et la date sont enregistrées, et le client est notifié.
+- **Jamais de confirmation automatique** ; un justificatif ne suffit pas.
+- **Anti double paiement :** une référence ne peut servir qu'une fois par opérateur (index unique) ; la confirmation se fait sous verrou et un paiement traité est figé par la base (déclencheur). Testé avec 3 confirmations simultanées : une seule passe.
+- **Espèces à la livraison :** le livreur déclare le montant encaissé, le paiement reste en attente jusqu'à la confirmation de la remise en caisse par le comptable.
+- Règlements directs (constatés) et remboursements tracés. Statut de paiement de la commande dérivé : en attente, en vérification, partiellement payé, payé, refusé, remboursé, partiellement remboursé. Le montant réglé est reporté automatiquement sur la facture.
+- Aucun code PIN, mot de passe ou code secret n'est demandé ni stocké.
+
+### Livraisons (`src/server/services/deliveries.ts`)
+- Créée automatiquement quand la commande est « Prête à expédier » ; affectation à un livreur (compte avec le rôle Livreur) ou à un transporteur avec numéro de suivi ; date prévue.
+- Statuts propres (à planifier, affectée, en cours, livrée, échec) avec historique immuable ; « En cours » et « Livrée » font avancer la commande.
+- Le livreur ne voit que ses livraisons : destinataire, téléphone, adresse, colis, instructions, montant à encaisser. Fiche de livraison imprimable.
+
 ### Matrice des rôles
 | Permission | Admin | Stock | Commandes | Comptable | Livreur |
 |---|:-:|:-:|:-:|:-:|:-:|
@@ -89,9 +107,13 @@ Tous les prix sont calculés côté serveur ; un prix venant du navigateur n'est
 | Factures (brouillons, émission, annulation, avoirs) | ✓ | | | ✓ | |
 | Suppression de brouillons de facture | ✓ | | | | |
 | Chiffre d'affaires | ✓ | | | ✓ | |
+| Paiements (lecture) | ✓ | | ✓ | ✓ | |
+| Vérifier / enregistrer / rembourser un paiement | ✓ | | | ✓ | |
+| Configurer les moyens de paiement | ✓ | | | | |
+| Gérer et affecter les livraisons | ✓ | | ✓ | | |
+| Ses propres livraisons (départ, remise, encaissement déclaré) | | | | | ✓ |
 | Paramètres, utilisateurs, audit | ✓ | | | | |
 
-Le rôle Livreur n'a encore aucun écran (module livraison : Phase 4).
 
 ## Installation
 
@@ -113,14 +135,14 @@ npm run dev                     # http://localhost:3000
 
 ## Tests
 ```bash
-npm test                        # 98 tests d'intégration sur la base amklabo_test (réinitialisée à chaque lancement)
+npm test                        # 113 tests d'intégration sur la base amklabo_test (réinitialisée à chaque lancement)
 npm run build && <démarrer le serveur sur la base de test, port 3100>
-BASE_URL=http://localhost:3100 ADMIN_EMAIL=… ADMIN_PASSWORD=… npm run test:e2e   # 39 étapes Chromium
+BASE_URL=http://localhost:3100 ADMIN_EMAIL=… ADMIN_PASSWORD=… npm run test:e2e   # 49 étapes Chromium
 ```
 La base `amklabo_test` doit exister (même propriétaire, mêmes extensions).
 
 ## Déploiement
-- `npm run build` produit un serveur autonome (`.next/standalone`).
+- `npm run build` produit un serveur autonome : copier `public/` dans `.next/standalone/public` et `.next/static` dans `.next/standalone/.next/static`, puis lancer `node .next/standalone/server.js` (variables `PORT`, `DATABASE_URL`, `UPLOAD_DIR`).
 - En production : HTTPS obligatoire (cookie `secure`), `NODE_ENV=production`, `DATABASE_URL` avec le rôle `amklabo_app` uniquement.
 - Le proxy doit transmettre `X-Forwarded-For` (limitation des tentatives de connexion par IP).
 - `UPLOAD_DIR` sur un volume persistant et sauvegardé ; sauvegarde quotidienne de PostgreSQL (`pg_dump`).
@@ -130,6 +152,8 @@ La base `amklabo_test` doit exister (même propriétaire, mêmes extensions).
 - Coordonnées, informations de facturation (raison sociale, NIF, RC) : *Administration → Paramètres*.
 - Textes des CGV, confidentialité, livraison/retours, à propos (à faire valider juridiquement) : *Pages de contenu*.
 - Frais de livraison de Nouakchott, puis activation de la zone (la commande en ligne est impossible tant qu'aucune zone n'est active).
+- Comptes marchands officiels et instructions de chaque moyen de paiement (Administration → Moyens de paiement), puis activation.
+- Comptes des livreurs (Utilisateurs et rôles → rôle Livreur).
 - Régime fiscal (taxe incluse ou non), échéance des factures, délai de retour, et validation du modèle de facture.
 - Le fichier source du logo en haute résolution / vectoriel si disponible (le logo actuel est celui fourni, recadré de ses marges blanches uniquement ; l'original est dans `public/brand/logo-original.webp`).
 - Le catalogue réel : produits, prix, photos et caractéristiques vérifiées.
@@ -137,5 +161,6 @@ La base `amklabo_test` doit exister (même propriétaire, mêmes extensions).
 ## Feuille de route
 - ~~Phase 2~~ : comptes professionnels, tarification, stock par lots, fournisseurs et achats, gestion complète des clients.
 - ~~Phase 3~~ : panier, commandes, réservation de stock, factures PDF, avoirs, espace client.
+- ~~Phase 4~~ : paiements (vérification manuelle), livraisons et livreurs.
 - **Phase 4** : paiements (procédure manuelle de vérification Bankily/Masrivi/Sedad/Bimbank/Click/espèces ; API officielles si disponibles), livraisons et livreurs.
 - **Phase 5** : rapports, exports CSV, notifications (e-mail/SMS : fournisseur à choisir), traduction arabe.

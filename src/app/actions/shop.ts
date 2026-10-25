@@ -6,6 +6,7 @@ import { formString, runAction, type ActionState } from "@/server/action";
 import { getActor } from "@/server/current";
 import { UserError } from "@/server/errors";
 import { markAllRead } from "@/server/services/notifications";
+import { submitPayment } from "@/server/services/payments";
 import { addToCart, cancelMyOrder, placeOrder, reorder, requestReturn, setCartQuantity } from "@/server/services/orders";
 
 const int = (v: string) => (/^\d{1,7}$/.test(v.trim()) ? Number(v) : NaN);
@@ -36,7 +37,7 @@ export async function placeOrderAction(_: ActionState, fd: FormData): Promise<Ac
     if (!addressId) throw new UserError("Choisissez une adresse de livraison.", { addressId: "Adresse requise" });
     const expected = Number(formString(fd, `expected_${addressId}`));
     const res = await placeOrder(await getActor(), {
-      addressId, note: formString(fd, "note"), idempotencyKey: formString(fd, "idempotencyKey"),
+      addressId, paymentMethodCode: formString(fd, "paymentMethodCode"), note: formString(fd, "note"), idempotencyKey: formString(fd, "idempotencyKey"),
       expectedTotalMinor: Number.isFinite(expected) ? expected : null,
     });
     number = res.number;
@@ -77,4 +78,16 @@ export async function reorderAction(_: ActionState, fd: FormData): Promise<Actio
 export async function markNotificationsReadAction(): Promise<void> {
   await markAllRead(await getActor());
   revalidatePath("/", "layout");
+}
+
+export async function submitPaymentAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  return runAction(async () => {
+    const proof = fd.get("proof");
+    await submitPayment(await getActor(), formString(fd, "number"), {
+      reference: formString(fd, "reference"), payerPhone: formString(fd, "payerPhone"),
+      proof: proof instanceof File && proof.size > 0 ? proof : null,
+    });
+    revalidatePath("/compte/commandes");
+    return "Paiement transmis : il sera vérifié par notre équipe avant confirmation.";
+  });
 }

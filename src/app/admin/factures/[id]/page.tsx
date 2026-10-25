@@ -8,6 +8,9 @@ import { formatMRU, minorToInput } from "@/lib/money";
 import { requirePermissionPage } from "@/server/current";
 import { can } from "@/server/permissions";
 import { adminGetInvoice, INVOICE_STATUS, paymentState, PAYMENT_LABEL } from "@/server/services/invoices";
+import { PaymentPanel } from "@/components/payment-panel";
+import { listPaymentsFor, type PaymentMethod } from "@/server/services/payments";
+import { query } from "@/server/db";
 import {
   addInvoiceLineAction, cancelInvoiceAction, createCreditNoteAction, deleteDraftAction, issueInvoiceAction, updateDraftAction,
 } from "../../order-actions";
@@ -23,6 +26,12 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const isCredit = i.kind === "credit_note";
   const label = isCredit ? "Avoir" : "Facture";
   const balance = Math.max(i.total_minor - i.credited_total_minor - i.amount_paid_minor, 0);
+  // Règlements directs : factures manuelles seulement (ceux d'une commande se gèrent sur la commande).
+  const manualPayments = !isCredit && !i.order_id && i.status === "issued" && can(actor.roles, "payments.view");
+  const [payments, methods] = manualPayments
+    ? await Promise.all([listPaymentsFor(actor, { invoiceId: i.id }), query<PaymentMethod>("SELECT * FROM payment_methods ORDER BY sort_order")])
+    : [[], []];
+  const pendingSum = payments.filter((p) => p.status === "pending_verification").reduce((a, p) => a + p.amount_minor, 0);
 
   return (
     <>
@@ -73,6 +82,10 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
             </Card>
           )}
           {isCredit && draft && <p className="text-sm text-slate-600">Avoir partiel : réduisez les quantités ou supprimez les lignes non concernées (0). Le total ne peut pas dépasser le montant restant de la facture.</p>}
+          {manualPayments && (
+            <PaymentPanel target={{ invoiceId: i.id }} payments={payments} methods={methods} dueMinor={Math.max(balance - pendingSum, 0)}
+              canVerify={can(actor.roles, "payments.verify")} canRefund={can(actor.roles, "payments.refund")} />
+          )}
           {creditNotes.length > 0 && (
             <Card className="p-5 text-sm">
               <h2 className="mb-2 font-semibold">Avoirs liés</h2>
@@ -94,7 +107,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
                 <p className="flex justify-between"><span>Réglé</span><span>{formatMRU(i.amount_paid_minor)}</span></p>
                 <p className="flex justify-between font-semibold"><span>Reste à payer</span><span>{formatMRU(balance)}</span></p>
                 <p className="pt-1"><Badge tone={paymentState(i) === "paid" ? "green" : "amber"}>{PAYMENT_LABEL[paymentState(i)]}</Badge></p>
-                <p className="text-xs text-slate-500">L&apos;enregistrement des règlements arrive avec le module paiements (Phase 4).</p>
+                {i.order_id && <p className="text-xs text-slate-500">Les règlements se gèrent sur la <Link className="underline" href={`/admin/commandes/${i.order_id}`}>commande</Link> et sont reportés ici automatiquement.</p>}
               </>
             )}
           </Card>

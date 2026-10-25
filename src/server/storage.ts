@@ -23,7 +23,7 @@ export const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg
 
 /** Enregistre une image validée par sa signature binaire ; retourne son chemin relatif. */
 export async function saveImage(
-  file: File, folder: "products" | "brand", allowed: ("png" | "jpg" | "webp")[] = ["png", "jpg", "webp"],
+  file: File, folder: "products" | "brand" | "payments", allowed: ("png" | "jpg" | "webp")[] = ["png", "jpg", "webp"],
 ): Promise<string> {
   if (file.size === 0) throw new UserError("Le fichier est vide.");
   if (file.size > MAX_IMAGE_BYTES) throw new UserError("L'image dépasse la taille maximale de 5 Mo.");
@@ -39,16 +39,21 @@ export async function saveImage(
   return rel;
 }
 
-/** Résout un chemin relatif en empêchant toute sortie du répertoire de stockage. */
-export function resolveStoragePath(rel: string): string | null {
-  if (!/^(products|brand)\/[0-9a-f-]{36}\.(png|jpg|webp)$/.test(rel)) return null;
+/**
+ * Résout un chemin relatif en empêchant toute sortie du répertoire de stockage.
+ * Les justificatifs de paiement (dossier « payments ») ne sont jamais servis
+ * publiquement : ils ne sont résolus qu'avec privateFiles = true, après contrôle des droits.
+ */
+export function resolveStoragePath(rel: string, privateFiles = false): string | null {
+  const folders = privateFiles ? "payments" : "products|brand";
+  if (!new RegExp(`^(${folders})/[0-9a-f-]{36}\\.(png|jpg|webp)$`).test(rel)) return null;
   const root = uploadRoot();
   const abs = path.resolve(root, rel);
   return abs.startsWith(root + path.sep) ? abs : null;
 }
 
 export async function deleteStoredFile(rel: string) {
-  const abs = resolveStoragePath(rel);
+  const abs = resolveStoragePath(rel) ?? resolveStoragePath(rel, true);
   if (abs) await fs.rm(abs, { force: true });
 }
 

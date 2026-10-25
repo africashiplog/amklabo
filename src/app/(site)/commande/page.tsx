@@ -9,6 +9,7 @@ import { requireActorPage } from "@/server/current";
 import { listMyAddresses } from "@/server/services/customer-account";
 import { getMyCart, shippingFee } from "@/server/services/orders";
 import { listActiveZones } from "@/server/services/zones";
+import { listActiveMethods } from "@/server/services/payments";
 import { placeOrderAction } from "../../actions/shop";
 
 export const metadata: Metadata = { title: "Validation de commande" };
@@ -17,7 +18,7 @@ export default async function CheckoutPage() {
   const actor = await requireActorPage("/commande");
   const cart = await getMyCart(actor).catch(() => null);
   if (!cart || cart.lines.length === 0 || !cart.canCheckout) redirect("/panier");
-  const [addresses, zones] = await Promise.all([listMyAddresses(actor), listActiveZones()]);
+  const [addresses, zones, methods] = await Promise.all([listMyAddresses(actor), listActiveZones(), listActiveMethods()]);
   const zoneById = new Map(zones.map((z) => [z.id, z]));
   // Frais et total calculés côté serveur pour chaque adresse.
   const options = addresses.map((a) => {
@@ -58,9 +59,26 @@ export default async function CheckoutPage() {
             <Field name="note" label="Instructions pour la livraison" hint="(facultatif)" as="textarea" rows={3} />
           </Card>
           <Card className="p-5 text-sm text-slate-700">
-            <h2 className="mb-2 font-semibold text-slate-900">Paiement</h2>
-            <p>Aucun paiement n&apos;est demandé en ligne à cette étape. Après validation, notre équipe confirme votre commande et les modalités de règlement
-              (paiement à la livraison, Bankily, Masrivi, Sedad, Bimbank ou Click selon les moyens ouverts).</p>
+            <h2 className="mb-3 font-semibold text-slate-900">Moyen de paiement</h2>
+            {methods.length === 0 ? (
+              <Alert tone="warning">Aucun moyen de paiement n&apos;est encore ouvert. <Link href="/contact" className="underline">Contactez-nous</Link> pour commander.</Alert>
+            ) : (
+              <fieldset className="space-y-2">
+                <legend className="sr-only">Moyen de paiement</legend>
+                {methods.map((m, i) => (
+                  <label key={m.code} className="flex cursor-pointer gap-3 rounded-lg border border-slate-300 p-3 hover:border-brand-500">
+                    <input type="radio" name="paymentMethodCode" value={m.code} defaultChecked={i === 0} className="mt-1" />
+                    <span>
+                      <strong>{m.name}</strong>
+                      <span className="block text-xs text-slate-500">
+                        {m.kind === "cash_on_delivery" ? "Vous réglez en espèces à la réception." : "Après la commande, vous effectuez le paiement puis transmettez la référence de la transaction ; il sera vérifié par notre équipe."}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+            )}
+            <p className="mt-3 text-xs text-slate-500">Ne communiquez jamais votre code PIN ou mot de passe : AMKLABO ne vous les demandera jamais.</p>
           </Card>
         </div>
         <Card className="h-fit space-y-3 p-5">
@@ -79,7 +97,7 @@ export default async function CheckoutPage() {
             </>
           )}
           <p className="text-xs text-slate-500">En validant, vous acceptez les <Link href="/conditions-generales" className="underline" target="_blank">conditions générales de vente</Link>.</p>
-          <SubmitButton variant="success" className="w-full" pendingLabel="Validation…">Valider la commande</SubmitButton>
+          {methods.length > 0 && <SubmitButton variant="success" className="w-full" pendingLabel="Validation…">Valider la commande</SubmitButton>}
         </Card>
       </ActionForm>
     </div>

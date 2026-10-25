@@ -18,6 +18,7 @@ import { query, queryOne, tx } from "../db";
 import { UnauthenticatedError, UserError } from "../errors";
 import { can } from "../permissions";
 import { notify } from "./notifications";
+import { syncOrderPayment } from "./payments";
 import { nextDocumentNumber } from "./purchasing";
 import { z } from "../validation";
 
@@ -334,6 +335,8 @@ export async function issueInvoice(actor: Actor | null, id: string) {
               tax_included_minor = $7, issued_by = $8, issued_at = now() WHERE id = $1`,
       [id, number, today, due, JSON.stringify(seller), s.tax_rate_bp, includedTax(totals.total_minor, s.tax_rate_bp), actor.id],
     );
+    // Les règlements déjà encaissés sur la commande sont reportés sur la facture.
+    if (inv.kind === "invoice" && totals.order_id) await syncOrderPayment(db, totals.order_id);
     await audit(actor, inv.kind === "credit_note" ? "credit_note.issue" : "invoice.issue", "invoice", id, { after: { number, total: totals.total_minor } }, db);
     await notify(db, totals.customer_user, `${inv.kind === "credit_note" ? "Avoir" : "Facture"} ${number} disponible`,
       "Vous pouvez la télécharger depuis votre espace client.", "/compte/factures");

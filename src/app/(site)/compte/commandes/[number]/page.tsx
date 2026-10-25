@@ -9,6 +9,9 @@ import { formatDateTime } from "@/lib/format";
 import { formatMRU } from "@/lib/money";
 import { requireActorPage } from "@/server/current";
 import { ORDER_STATUS, getMyOrder } from "@/server/services/orders";
+import { DELIVERY_STATUS, getShipmentForOrder } from "@/server/services/deliveries";
+import { listActiveMethods, listMyOrderPayments, orderAmountDue, PAYMENT_RECORD_STATUS } from "@/server/services/payments";
+import { PaymentForm } from "@/components/payment-form";
 import { cancelMyOrderAction, reorderAction, requestReturnAction } from "../../../../actions/shop";
 
 type Props = { params: Promise<{ number: string }>; searchParams: Promise<{ confirmee?: string }> };
@@ -28,6 +31,11 @@ export default async function MyOrder({ params, searchParams }: Props) {
   const { confirmee } = await searchParams;
   const canCancel = ["new", "pending_confirmation", "confirmed", "preparing"].includes(o.status) && !o.cancel_requested_at;
   const direct = ["new", "pending_confirmation"].includes(o.status);
+  const [payments, shipment, methods, due] = await Promise.all([
+    listMyOrderPayments(actor, number), getShipmentForOrder(o.id), listActiveMethods(), orderAmountDue(undefined, o.id),
+  ]);
+  const method = methods.find((m) => m.code === o.payment_method_code) ?? null;
+  const canPay = method?.kind === "mobile_money" && due > 0 && !["cancelled", "returned"].includes(o.status);
   const canReturn = o.status === "delivered" && !returns.some((r) => r.status === "requested" || r.status === "accepted");
 
   return (
@@ -39,7 +47,7 @@ export default async function MyOrder({ params, searchParams }: Props) {
         <PaymentStatusBadge status={o.payment_status} />
       </div>
       <p className="mt-1 text-sm text-slate-600">Passée le {formatDateTime(o.placed_at)}</p>
-      {confirmee && <div className="mt-4"><Alert tone="success">Merci ! Votre commande a bien été enregistrée. Notre équipe va la confirmer et vous indiquer les modalités de paiement.</Alert></div>}
+      {confirmee && <div className="mt-4"><Alert tone="success">Merci ! Votre commande a bien été enregistrée. Notre équipe va la confirmer.{canPay ? " Vous pouvez dès maintenant effectuer le paiement et transmettre sa référence ci-dessous." : ""}</Alert></div>}
       {o.cancel_requested_at && <div className="mt-4"><Alert tone="warning">Demande d&apos;annulation envoyée le {formatDateTime(o.cancel_requested_at)} — en attente de réponse.</Alert></div>}
       {o.status === "cancelled" && o.cancel_reason && <div className="mt-4"><Alert tone="error">Commande annulée : {o.cancel_reason}</Alert></div>}
 
@@ -96,6 +104,44 @@ export default async function MyOrder({ params, searchParams }: Props) {
             {o.ship_landmark && <p className="text-slate-500">Repère : {o.ship_landmark}</p>}
             {o.customer_note && <p className="mt-2 text-slate-600">Instructions : {o.customer_note}</p>}
           </Card>
+          <Card className="space-y-2 p-5 text-sm">
+            <h2 className="font-semibold">Paiement</h2>
+            <p>{method?.name ?? "—"}</p>
+            {canPay && method && (
+              <div className="space-y-2 rounded-lg bg-brand-50 p-3 text-brand-900">
+                <p>Montant à régler : <strong>{formatMRU(due)}</strong></p>
+                <p>Compte marchand {method.name} : <strong className="font-mono">{method.merchant_account}</strong></p>
+                {method.instructions && <p className="whitespace-pre-line text-xs">{method.instructions}</p>}
+                <p className="text-xs">Indiquez votre numéro de commande <strong>{o.number}</strong> dans le motif si possible.</p>
+                <PaymentForm number={o.number} referenceLabel={method.reference_label} allowsProof={method.allows_proof} />
+              </div>
+            )}
+            {payments.some((p) => p.status === "pending_verification") && (
+              <p className="rounded-lg bg-amber-50 p-3 text-amber-900">Votre paiement a bien été transmis : il est en cours de vérification par notre équipe. Vous serez notifié du résultat.</p>
+            )}
+            {method?.kind === "cash_on_delivery" && due > 0 && <p className="text-slate-600">À régler en espèces à la livraison : {formatMRU(due)}.</p>}
+            {payments.length > 0 && (
+              <ul className="space-y-1 border-t border-slate-100 pt-2">
+                {payments.map((p) => (
+                  <li key={p.id}>
+                    {p.kind === "refund" ? "Remboursement" : p.method_name} · {formatMRU(p.amount_minor)} · <Badge tone={p.status === "confirmed" ? "green" : p.status === "refused" ? "red" : "amber"}>{PAYMENT_RECORD_STATUS[p.status]}</Badge>
+                    {p.transaction_reference && <span className="block font-mono text-xs text-slate-500">Réf. {p.transaction_reference}</span>}
+                    {p.decision_note && <span className="block text-xs text-red-700">{p.decision_note}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+          {shipment && (
+            <Card className="space-y-1 p-5 text-sm">
+              <h2 className="font-semibold">Livraison</h2>
+              <p><Badge tone={shipment.status === "delivered" ? "green" : shipment.status === "failed" ? "red" : "blue"}>{DELIVERY_STATUS[shipment.status]}</Badge></p>
+              {shipment.scheduled_for && <p>Prévue le {shipment.scheduled_for.split("-").reverse().join("/")}</p>}
+              {shipment.carrier_name && <p>Transporteur : {shipment.carrier_name}</p>}
+              {shipment.tracking_number && <p>N° de suivi : <span className="font-mono">{shipment.tracking_number}</span></p>}
+              {shipment.status === "failed" && shipment.failed_reason && <p className="text-red-700">Tentative échouée : {shipment.failed_reason}. Nous vous recontacterons.</p>}
+            </Card>
+          )}
           {invoices.length > 0 && (
             <Card className="p-5 text-sm">
               <h2 className="mb-2 font-semibold">Factures</h2>
