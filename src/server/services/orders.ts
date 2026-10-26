@@ -178,9 +178,13 @@ export async function getMyCart(actor: Actor | null) {
   return loadCart(c.id, await getPriceContext(actor));
 }
 
-export type Zone = { id: string; name: string; fee_minor: number; free_shipping_threshold_minor: number | null };
+export type Zone = {
+  id: string; name: string; fee_minor: number; free_shipping_threshold_minor: number | null; fee_mode: "fixed" | "manual";
+};
 
-export function shippingFee(zone: Zone, subtotalMinor: number) {
+/** Frais de livraison de la zone ; null quand ils sont fixés par l'équipe après la commande. */
+export function shippingFee(zone: Zone, subtotalMinor: number): number | null {
+  if (zone.fee_mode === "manual") return null;
   return zone.free_shipping_threshold_minor !== null && subtotalMinor >= zone.free_shipping_threshold_minor ? 0 : zone.fee_minor;
 }
 
@@ -217,7 +221,7 @@ export async function placeOrder(actor: Actor | null, input: PlaceOrderInput) {
     }>("SELECT recipient, phone, city, district, line1, landmark, zone_id FROM addresses WHERE id = $1 AND customer_id = $2", [input.addressId, c.id], db);
     if (!address) throw new UserError("Choisissez une adresse de livraison.", { addressId: "Adresse requise" });
     const zone = address.zone_id
-      ? await queryOne<Zone>("SELECT id, name, fee_minor, free_shipping_threshold_minor FROM delivery_zones WHERE id = $1 AND is_active", [address.zone_id], db)
+      ? await queryOne<Zone>("SELECT id, name, fee_minor, free_shipping_threshold_minor, fee_mode FROM delivery_zones WHERE id = $1 AND is_active", [address.zone_id], db)
       : null;
     if (!zone) throw new UserError("Cette adresse n'est rattachée à aucune zone de livraison desservie. Modifiez-la ou choisissez-en une autre.", { addressId: "Zone non desservie" });
 
@@ -226,7 +230,9 @@ export async function placeOrder(actor: Actor | null, input: PlaceOrderInput) {
     );
     if (!method) throw new UserError("Choisissez un moyen de paiement disponible.", { paymentMethodCode: "Moyen de paiement requis" });
 
-    const shipping = shippingFee(zone, cart.subtotalMinor);
+    const fee = shippingFee(zone, cart.subtotalMinor);
+    const shippingPending = fee === null;
+    const shipping = fee ?? 0;
     const total = cart.subtotalMinor + shipping;
     if (input.expectedTotalMinor != null && input.expectedTotalMinor !== total) {
       throw new UserError(`Le montant de votre commande a changé (nouveau total : ${formatMRU(total)}). Vérifiez le récapitulatif avant de confirmer.`);
@@ -236,11 +242,12 @@ export async function placeOrder(actor: Actor | null, input: PlaceOrderInput) {
     const order = await queryOne<{ id: string }>(
       `INSERT INTO orders (number, customer_id, customer_name, customer_email, customer_phone, customer_type, business_name,
                            ship_recipient, ship_phone, ship_city, ship_district, ship_line1, ship_landmark, zone_id, zone_name,
-                           subtotal_minor, discount_minor, shipping_minor, total_minor, customer_note, idempotency_key, payment_method_code)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING id`,
+                           subtotal_minor, discount_minor, shipping_minor, total_minor, customer_note, idempotency_key, payment_method_code,
+                           shipping_pending)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) RETURNING id`,
       [number, c.id, c.full_name, c.email, c.phone, ctx.isBusiness ? "business" : "retail", c.business_name,
        address.recipient, address.phone, address.city, address.district, address.line1, address.landmark, zone.id, zone.name,
-       cart.subtotalMinor, cart.discountMinor, shipping, total, note, input.idempotencyKey, method.code],
+       cart.subtotalMinor, cart.discountMinor, shipping, total, note, input.idempotencyKey, method.code, shippingPending],
       db,
     );
     const orderId = order!.id;
@@ -268,19 +275,25 @@ export async function placeOrder(actor: Actor | null, input: PlaceOrderInput) {
     await db.query("DELETE FROM cart_items WHERE customer_id = $1", [c.id]);
     await audit(actor, "order.place", "order", orderId, { after: { number, total, lines: cart.lines.length } }, db);
     await notify(db, c.user_id, `Commande ${number} reçue`,
-      `Montant : ${formatMRU(total)} — paiement : ${method.name}. Notre équipe va la confirmer.`, `/compte/commandes/${number}`);
-    return { id: orderId, number, duplicate: false };
+      shippingPending
+        ? `Montant des produits : ${formatMRU(total)} — paiement : ${method.name}. Notre équipe va calculer les frais de livraison selon la quantité et l'adresse, puis vous indiquer le total à payer.`
+        : `Montant : ${formatMRU(total)} — paiement : ${method.name}. Notre équipe va la confirmer.`,
+      `/compte/commandes/${number}`);
+    return { id: orderId, number, duplicate: false, shippingPending };
   });
 }
 
 // ---------------------------------------------------------------------------
 // Changements de statut
 // ---------------------------------------------------------------------------
-type LockedOrder = { id: string; number: string; status: OrderStatus; customer_id: string; user_id: string | null; stock_consumed_at: Date | null };
+type LockedOrder = {
+  id: string; number: string; status: OrderStatus; customer_id: string; user_id: string | null; stock_consumed_at: Date | null;
+  shipping_pending: boolean;
+};
 
 async function lockOrder(db: PoolClient, id: string): Promise<LockedOrder> {
   const o = await queryOne<LockedOrder>(
-    `SELECT o.id, o.number, o.status, o.customer_id, c.user_id, o.stock_consumed_at
+    `SELECT o.id, o.number, o.status, o.customer_id, c.user_id, o.stock_consumed_at, o.shipping_pending
        FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.id = $1 FOR UPDATE OF o`,
     [id], db,
   );
@@ -389,6 +402,7 @@ export async function changeOrderStatus(actor: Actor | null, orderId: string, to
       await cancelInTx(db, actor, order, text);
       return;
     }
+    if (order.shipping_pending) throw new UserError("Fixez d'abord les frais de livraison de cette commande.", { shipping: "Frais à fixer" });
     if (to === "ready_to_ship") await consumeReservations(db, actor, order);
     if (to === "out_for_delivery") await syncShipment(db, actor, order.id, "in_transit", text);
     if (to === "delivered") {
@@ -396,6 +410,45 @@ export async function changeOrderStatus(actor: Actor | null, orderId: string, to
       await syncShipment(db, actor, order.id, "delivered", text);
     }
     await recordStatus(db, actor, order, to, text);
+  });
+}
+
+/**
+ * Fixe (ou corrige) les frais de livraison d'une commande avant sa confirmation :
+ * selon la quantité et l'adresse, quand la zone est en frais manuels.
+ * Refusé dès qu'une facture existe ou qu'un paiement a été déclaré ou reçu.
+ */
+export async function setOrderShipping(actor: Actor | null, orderId: string, amountMinor: number, note: string | null) {
+  assertCan(actor, "orders.manage");
+  if (!Number.isInteger(amountMinor) || amountMinor < 0 || amountMinor > 100_000_000) {
+    throw new UserError("Montant des frais invalide.", { shipping: "Montant invalide" });
+  }
+  const text = note?.trim().slice(0, 500) || null;
+  await tx(async (db) => {
+    const order = await lockOrder(db, orderId);
+    if (!["new", "pending_confirmation"].includes(order.status)) {
+      throw new UserError("Les frais de livraison ne peuvent être modifiés qu'avant la confirmation de la commande.");
+    }
+    const invoice = await queryOne("SELECT 1 FROM invoices WHERE order_id = $1 AND status <> 'cancelled'", [orderId], db);
+    if (invoice) throw new UserError("Une facture existe pour cette commande : modifiez les frais sur la facture brouillon ou annulez-la d'abord.");
+    const payment = await queryOne("SELECT 1 FROM payments WHERE order_id = $1 AND status IN ('pending_verification', 'confirmed')", [orderId], db);
+    if (payment) throw new UserError("Un paiement a déjà été déclaré ou reçu pour cette commande : les frais ne peuvent plus être modifiés.");
+    const before = (await queryOne<{ shipping_minor: number; total_minor: number; shipping_pending: boolean }>(
+      "SELECT shipping_minor, total_minor, shipping_pending FROM orders WHERE id = $1", [orderId], db,
+    ))!;
+    const after = (await queryOne<{ total_minor: number }>(
+      `UPDATE orders SET shipping_minor = $2, total_minor = subtotal_minor + $2, shipping_pending = false
+        WHERE id = $1 RETURNING total_minor`, [orderId, amountMinor], db,
+    ))!;
+    const label = `Frais de livraison fixés : ${formatMRU(amountMinor)} — total à payer : ${formatMRU(after.total_minor)}`;
+    await db.query(
+      "INSERT INTO order_status_history (order_id, from_status, to_status, note, actor_id, actor_name) VALUES ($1,$2,$2,$3,$4,$5)",
+      [orderId, order.status, text ? `${label} (${text})` : label, actor.id, actor.fullName],
+    );
+    await audit(actor, "order.shipping_set", "order", orderId, { before, after: { shipping_minor: amountMinor, total_minor: after.total_minor, note: text } }, db);
+    await notify(db, order.user_id, `Commande ${order.number} : frais de livraison fixés`,
+      `Frais de livraison : ${formatMRU(amountMinor)}. Total à payer : ${formatMRU(after.total_minor)}.${text ? ` ${text}` : ""}`,
+      `/compte/commandes/${order.number}`);
   });
 }
 
@@ -531,12 +584,12 @@ export async function completeReturn(actor: Actor | null, returnId: string, rest
 export type OrderRow = {
   id: string; number: string; status: OrderStatus; payment_status: keyof typeof PAYMENT_STATUS; customer_id: string;
   customer_name: string; customer_type: "retail" | "business"; business_name: string | null; total_minor: number;
-  item_count: number; placed_at: Date; cancel_requested_at: Date | null; open_return: boolean;
+  item_count: number; placed_at: Date; cancel_requested_at: Date | null; open_return: boolean; shipping_pending: boolean;
 };
 
 const ORDER_LIST = `
   SELECT o.id, o.number, o.status, o.payment_status, o.customer_id, o.customer_name, o.customer_type, o.business_name,
-         o.total_minor, o.placed_at, o.cancel_requested_at,
+         o.total_minor, o.placed_at, o.cancel_requested_at, o.shipping_pending,
          (SELECT count(*)::int FROM order_items i WHERE i.order_id = o.id) AS item_count,
          EXISTS (SELECT 1 FROM returns r WHERE r.order_id = o.id AND r.status IN ('requested', 'accepted')) AS open_return
     FROM orders o`;
@@ -615,6 +668,7 @@ export async function adminListOrders(actor: Actor | null, f: { q?: string; stat
     where.push(`o.status = $${args.length}::order_status`);
   }
   if (f.flag === "cancel_request") where.push("o.cancel_requested_at IS NOT NULL");
+  if (f.flag === "shipping") where.push("o.shipping_pending AND o.status <> 'cancelled'");
   if (f.flag === "return") where.push("EXISTS (SELECT 1 FROM returns r WHERE r.order_id = o.id AND r.status IN ('requested', 'accepted'))");
   const w = where.join(" AND ");
   const total = (await queryOne<{ n: number }>(`SELECT count(*)::int AS n FROM orders o WHERE ${w}`, args))!.n;

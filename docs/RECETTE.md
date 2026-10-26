@@ -1,8 +1,8 @@
 # Recette — critères d'acceptation (section 20 du cahier des charges)
 
 Légende des preuves :
-- **Auto** : test d'intégration (`npm test`, 123 tests sur une vraie base PostgreSQL).
-- **Navigateur** : parcours Chromium (`npm run test:e2e`, 52 étapes), exécuté sur l'image Docker de production.
+- **Auto** : test d'intégration (`npm test`, 128 tests sur une vraie base PostgreSQL).
+- **Navigateur** : parcours Chromium (`npm run test:e2e`, 54 étapes), exécuté sur le serveur de production (build autonome) avec une base vide.
 - **Manuel** : à vérifier par AMKLABO.
 - **Fournisseur** : nécessite un vrai compte ou service externe.
 
@@ -33,11 +33,13 @@ Légende des preuves :
 
 | Élément | Pourquoi | Action |
 |---|---|---|
-| Bankily, Masrivi, Sedad, Bimbank, Click | Aucune API officielle ni compte marchand fourni ; la procédure manuelle est testée avec des comptes fictifs | Saisir les comptes officiels, puis faire un paiement réel de faible montant pour chaque moyen activé |
+| Bankily, Masrivi, Sedad, Bimbank, Click | Aucune API officielle ; compte marchand 36608028 configuré, procédure manuelle testée avec un compte fictif | Faire un paiement réel de faible montant pour chaque moyen et vérifier sa réception sur le compte |
+| Frais de livraison manuels | Testés (blocage de la confirmation et du paiement, notification du total) | Définir qui fixe les frais et sous quel délai |
 | Paiement à la livraison | Procédure testée ; la remise réelle des espèces dépend de l'organisation interne | Définir qui confirme la remise en caisse (comptable) et quand |
 | Conformité des factures | Les mentions légales et le régime fiscal ne sont pas validés | Validation par un comptable ou expert-comptable mauritanien |
-| Textes juridiques | Pages laissées « à rédiger » volontairement | Rédaction et validation juridique |
-| E-mail / SMS | Non configurés : notifications dans l'espace client uniquement | Choisir un fournisseur si nécessaire (coût et compte requis) |
+| Textes juridiques | Prêts en PDF selon le propriétaire, pas encore transmis ; le téléversement PDF est testé | Téléverser les 4 PDF dans Pages de contenu |
+| Catalogue | 53 brouillons sans prix ni caractéristiques, images d'illustration générées | Compléter, photographier les vrais produits, publier |
+| E-mail / SMS / WhatsApp | Notifications dans l'espace client ; WhatsApp par boutons (message prérempli, envoi manuel) | API WhatsApp Business si un envoi automatique est souhaité (compte Meta requis) |
 | Hébergement, HTTPS et sauvegardes externes | Dépendent du serveur choisi | Suivre `DEPLOIEMENT.md`, puis tester une restauration |
 | Charge réelle | Aucun test de charge effectué | Tester avec le volume attendu avant une campagne commerciale |
 | Arabe | Architecture prête (direction RTL, propriétés logiques), traduction non faite ; PDF limités aux caractères latins | Traduction et police arabe si nécessaire |

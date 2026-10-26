@@ -47,7 +47,12 @@ export default async function ProductPage({ params, searchParams }: Props) {
       </nav>
       <div className="grid gap-10 lg:grid-cols-2">
         {images.length > 0 ? (
-          <Gallery name={p.name} images={images.map((i) => ({ id: i.id, url: mediaUrl(i.storage_path), alt: i.alt }))} />
+          <div>
+            <Gallery name={p.name} images={images.map((i) => ({ id: i.id, url: mediaUrl(i.storage_path), alt: i.alt }))} />
+            {images.some((i) => i.is_illustration) && (
+              <p className="mt-2 text-xs text-slate-500">Image d&apos;illustration — le produit livré (marque, conditionnement) peut différer.</p>
+            )}
+          </div>
         ) : (
           <ProductImagePlaceholder className="aspect-square rounded-xl border border-slate-200" />
         )}

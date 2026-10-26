@@ -23,10 +23,12 @@ export default async function CheckoutPage() {
   // Frais et total calculés côté serveur pour chaque adresse.
   const options = addresses.map((a) => {
     const zone = a.zone_id ? zoneById.get(a.zone_id) : undefined;
+    // fee null avec une zone : frais fixés par l'équipe après la commande (le total attendu exclut alors la livraison).
     const fee = zone ? shippingFee(zone, cart.subtotalMinor) : null;
-    return { a, zone, fee, total: fee === null ? null : cart.subtotalMinor + fee };
+    return { a, zone, fee, total: zone ? cart.subtotalMinor + (fee ?? 0) : null };
   });
-  const usable = options.filter((o) => o.total !== null);
+  const usable = options.filter((o) => o.zone);
+  const sameFee = new Set(usable.map((u) => u.fee)).size === 1;
   const idempotencyKey = randomUUID().replace(/-/g, "");
 
   return (
@@ -43,12 +45,12 @@ export default async function CheckoutPage() {
             <fieldset className="space-y-2">
               <legend className="sr-only">Adresse de livraison</legend>
               {options.map(({ a, zone, fee }) => (
-                <label key={a.id} className={`flex gap-3 rounded-lg border p-3 text-sm ${fee === null ? "border-slate-200 bg-slate-50 text-slate-400" : "cursor-pointer border-slate-300 hover:border-brand-500"}`}>
-                  <input type="radio" name="addressId" value={a.id} disabled={fee === null} defaultChecked={fee !== null && a.id === usable[0]?.a.id} className="mt-1" />
+                <label key={a.id} className={`flex gap-3 rounded-lg border p-3 text-sm ${!zone ? "border-slate-200 bg-slate-50 text-slate-400" : "cursor-pointer border-slate-300 hover:border-brand-500"}`}>
+                  <input type="radio" name="addressId" value={a.id} disabled={!zone} defaultChecked={!!zone && a.id === usable[0]?.a.id} className="mt-1" />
                   <span>
                     <strong>{a.label}</strong> — {a.recipient}, {a.phone}<br />
                     {a.line1}{a.district ? `, ${a.district}` : ""}, {a.city}<br />
-                    {zone ? <>Zone {zone.name} · livraison {fee === 0 ? "offerte" : formatMRU(fee!)}</> : <span className="text-red-700">Zone non desservie : modifiez l&apos;adresse</span>}
+                    {zone ? <>Zone {zone.name} · livraison {fee === null ? "calculée par notre équipe" : fee === 0 ? "offerte" : formatMRU(fee)}</> : <span className="text-red-700">Zone non desservie : modifiez l&apos;adresse</span>}
                   </span>
                 </label>
               ))}
@@ -92,8 +94,16 @@ export default async function CheckoutPage() {
           {cart.discountMinor > 0 && <p className="flex justify-between text-sm text-leaf-700"><span>dont remises</span><span>{formatMRU(cart.discountMinor)}</span></p>}
           {usable.length > 0 && (
             <>
-              <p className="flex justify-between text-sm"><span>Livraison</span><span>{usable.length === 1 || new Set(usable.map((u) => u.fee)).size === 1 ? formatMRU(usable[0].fee!) : "selon l'adresse"}</span></p>
-              <p className="flex justify-between text-lg font-bold"><span>Total</span><span>{new Set(usable.map((u) => u.total)).size === 1 ? formatMRU(usable[0].total!) : "selon l'adresse"}</span></p>
+              <p className="flex justify-between text-sm"><span>Livraison</span><span>{!sameFee ? "selon l'adresse" : usable[0].fee === null ? "à confirmer" : formatMRU(usable[0].fee)}</span></p>
+              <p className="flex justify-between text-lg font-bold">
+                <span>{sameFee && usable[0].fee === null ? "Total produits" : "Total"}</span>
+                <span>{new Set(usable.map((u) => u.total)).size === 1 ? formatMRU(usable[0].total!) : "selon l'adresse"}</span>
+              </p>
+              {usable.some((u) => u.fee === null) && (
+                <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900">
+                  Les frais de livraison dépendent de la quantité et de l&apos;adresse : notre équipe les calcule après votre commande et vous indique le total à payer avant de la confirmer. Vous pourrez encore annuler à ce moment-là.
+                </p>
+              )}
             </>
           )}
           <p className="text-xs text-slate-500">En validant, vous acceptez les <Link href="/conditions-generales" className="underline" target="_blank">conditions générales de vente</Link>.</p>

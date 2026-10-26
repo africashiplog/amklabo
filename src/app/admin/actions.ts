@@ -10,7 +10,7 @@ import {
   makeCoverImage, moveCategory, updateCategory, updateProduct, type ProductInput,
 } from "@/server/services/catalog";
 import { markMessageHandled } from "@/server/services/contact";
-import { replaceLogo, resetLogo, updateContentPage, updateStoreSettings } from "@/server/services/settings";
+import { replaceLogo, resetLogo, setContentPagePdf, updateContentPage, updateStoreSettings } from "@/server/services/settings";
 import { createStaffUser, resetUserPassword, setStaffRoles, setUserStatus } from "@/server/services/users";
 import { saveZone } from "@/server/services/zones";
 
@@ -176,11 +176,30 @@ export async function saveContentPageAction(_: ActionState, fd: FormData): Promi
   });
 }
 
+export async function uploadContentPdfAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  return runAction(async () => {
+    const file = fd.get("pdf");
+    if (!(file instanceof File) || file.size === 0) throw new UserError("Choisissez un fichier PDF.", { pdf: "Fichier requis" });
+    await setContentPagePdf(await getActor(), formString(fd, "slug"), file);
+    refreshSite();
+    return "Document PDF publié.";
+  });
+}
+
+export async function removeContentPdfAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  return runAction(async () => {
+    await setContentPagePdf(await getActor(), formString(fd, "slug"), null);
+    refreshSite();
+    return "Document PDF retiré.";
+  });
+}
+
 export async function saveZoneAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return runAction(async () => {
     await saveZone(await getActor(), formOptional(fd, "id"), {
       name: formString(fd, "name"), city: formString(fd, "city"), fee: formString(fd, "fee"),
       freeThreshold: formString(fd, "freeThreshold"), isActive: fd.get("isActive") === "on",
+      feeMode: fd.get("manualFee") === "on" ? "manual" : "fixed",
     });
     refreshSite();
     return "Zone enregistrée.";

@@ -25,6 +25,9 @@ docker compose run --rm tools                             # migrations + rôle a
 docker compose run --rm tools npm run db:seed             # catégories, zone Nouakchott (inactive), pages
 docker compose run --rm -e ADMIN_PASSWORD='<mot de passe>' tools \
   npm run admin:create -- --email vous@amklabo.mr --name "Votre nom"
+docker compose run --rm tools npm run config:akmlabo      # AKM Labo : paiements (compte 36608028), Nouakchott en frais manuels
+docker compose run --rm tools npm run catalogue:import  # 53 produits en brouillon + images d'illustration
+docker compose run --rm --no-deps --user root app chown -R amklabo:amklabo /data/uploads   # fichiers à l'application
 docker compose up -d app                                  # application sur 127.0.0.1:3000
 curl -s http://127.0.0.1:3000/api/sante                   # {"statut":"ok"}
 ```
@@ -125,12 +128,12 @@ Node.js 22 et PostgreSQL 16 (extensions `citext` et `pgcrypto`) : voir le README
 
 ## 10. Liste de mise en service
 
-1. Paramètres du magasin : coordonnées, raison sociale, NIF, registre du commerce, coordonnées bancaires, mentions de facture. Le régime fiscal (taux de taxe) et le modèle de facture doivent être **validés par votre comptable**.
-2. Pages de contenu : conditions générales, confidentialité, livraison et retours, à propos. À rédiger et à **faire valider juridiquement**.
-3. Zones de livraison : frais et seuil de gratuité de Nouakchott, puis activation.
-4. Moyens de paiement : comptes marchands officiels et instructions, puis activation.
+1. Paramètres du magasin : coordonnées (téléphone, WhatsApp, e-mail, adresse), NIF, registre du commerce, mentions de facture. La raison sociale « AKM Labo » est appliquée par `config:akmlabo`. Le régime fiscal (taux de taxe) et le modèle de facture doivent être **validés par votre comptable**.
+2. Pages de contenu : téléverser le PDF validé de chaque page (conditions générales, confidentialité, livraison et retours, à propos) et remplacer le texte provisoire par un court résumé.
+3. Zones de livraison : Nouakchott active en frais manuels (`config:akmlabo`) ; chaque nouvelle commande apparaît dans Commandes → « Frais de livraison à fixer ».
+4. Moyens de paiement : espèces et les 5 portefeuilles sur le compte 36608028 (`config:akmlabo`) ; relire les instructions affichées et faire un paiement réel de faible montant par moyen.
 5. Comptes du personnel : gestionnaire de stock, gestionnaire des commandes, comptable, livreurs.
-6. Catalogue : catégories, produits, prix, paliers, photos et caractéristiques **vérifiées**.
+6. Catalogue : compléter les 53 brouillons importés (prix, marque, conditionnement, caractéristiques **vérifiées**), remplacer les images d'illustration par de vraies photos, puis publier.
 7. Stock initial : entrées par lots, avec les dates de péremption réelles.
 8. Commande test complète avec un vrai client et un vrai paiement de faible montant, de la commande jusqu'à la facture.
 9. Première sauvegarde et test de restauration.

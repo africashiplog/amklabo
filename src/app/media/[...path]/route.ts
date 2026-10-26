@@ -13,7 +13,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ path: s
         "Content-Type": MIME[ext] ?? "application/octet-stream",
         // Noms de fichiers aléatoires et immuables : mise en cache longue.
         "Cache-Control": "public, max-age=31536000, immutable",
-        "Content-Security-Policy": "default-src 'none'",
+        // Les visionneuses PDF intégrées aux navigateurs ne fonctionnent pas sous « default-src 'none' ».
+        ...(ext === "pdf" ? { "Content-Disposition": "inline" } : { "Content-Security-Policy": "default-src 'none'" }),
       },
     });
   } catch {

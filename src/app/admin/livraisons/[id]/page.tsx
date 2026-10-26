@@ -8,6 +8,7 @@ import { formatDateTime } from "@/lib/format";
 import { formatMRU, minorToInput } from "@/lib/money";
 import { requireActorPage } from "@/server/current";
 import { DELIVERY_STATUS, getShipment, listDrivers } from "@/server/services/deliveries";
+import { WhatsAppButton } from "@/components/whatsapp-button";
 import { assignShipmentAction, completeDeliveryAction, failDeliveryAction, startDeliveryAction } from "../../payment-actions";
 
 export default async function DeliveryPage({ params }: { params: Promise<{ id: string }> }) {
@@ -32,6 +33,10 @@ export default async function DeliveryPage({ params }: { params: Promise<{ id: s
             <h2 className="mb-1 font-semibold">Destinataire</h2>
             <p className="text-base font-medium">{s.ship_recipient}</p>
             <p><a href={`tel:${s.ship_phone.replace(/\s/g, "")}`} className="font-semibold text-brand-700 underline">{s.ship_phone}</a></p>
+            {["assigned", "in_transit", "failed"].includes(s.status) && (
+              <WhatsAppButton phone={s.ship_phone} label="Prévenir le destinataire sur WhatsApp"
+                message={`Bonjour ${s.ship_recipient},\nVotre commande ${s.order_number} ${s.status === "in_transit" ? "est en route" : s.status === "failed" ? "n'a pas pu être livrée : convenons d'un nouveau créneau" : "va bientôt être livrée"}.${isCod && amountToCollect > 0 ? `\nMontant à régler en espèces à la livraison : ${formatMRU(amountToCollect)}.` : ""}\nNous ne vous demanderons jamais votre code PIN ni votre mot de passe.`} />
+            )}
             <p>{s.ship_line1}{s.ship_district ? `, ${s.ship_district}` : ""}, {s.ship_city} — zone {s.zone_name}</p>
             {s.ship_landmark && <p className="text-slate-600">Repère : {s.ship_landmark}</p>}
             {s.customer_note && <p className="rounded bg-amber-50 p-2 text-amber-900">Instructions : {s.customer_note}</p>}

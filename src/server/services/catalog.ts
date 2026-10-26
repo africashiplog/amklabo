@@ -51,7 +51,7 @@ export type ProductRow = {
   cover_path: string | null;
 };
 
-export type ProductImage = { id: string; storage_path: string; alt: string | null; sort_order: number };
+export type ProductImage = { id: string; storage_path: string; alt: string | null; sort_order: number; is_illustration: boolean };
 
 // Statuts visibles sur le site public.
 const PUBLIC_STATUSES = "('published','unavailable')";
@@ -173,7 +173,7 @@ export async function listNewestProducts(limit = 8) {
 
 export async function listProductImages(productId: string, db?: Db) {
   return query<ProductImage>(
-    "SELECT id, storage_path, alt, sort_order FROM product_images WHERE product_id = $1 ORDER BY sort_order, created_at",
+    "SELECT id, storage_path, alt, sort_order, is_illustration FROM product_images WHERE product_id = $1 ORDER BY sort_order, created_at",
     [productId],
     db,
   );

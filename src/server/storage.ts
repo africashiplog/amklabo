@@ -19,7 +19,26 @@ export function detectImageType(buf: Buffer): "png" | "jpg" | "webp" | null {
   return null;
 }
 
-export const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", webp: "image/webp" };
+export const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", webp: "image/webp", pdf: "application/pdf" };
+
+export const MAX_PDF_BYTES = 5 * 1024 * 1024;
+
+export function isPdf(buf: Buffer) {
+  return buf.length >= 5 && buf.toString("ascii", 0, 5) === "%PDF-";
+}
+
+/** Enregistre un document PDF public (pages juridiques) validé par sa signature ; retourne son chemin relatif. */
+export async function savePdf(file: File): Promise<string> {
+  if (file.size === 0) throw new UserError("Le fichier est vide.");
+  if (file.size > MAX_PDF_BYTES) throw new UserError("Le PDF dépasse la taille maximale de 5 Mo.");
+  const buf = Buffer.from(await file.arrayBuffer());
+  if (!isPdf(buf)) throw new UserError("Format non pris en charge : seul un fichier PDF est accepté.");
+  const rel = `documents/${randomUUID()}.pdf`;
+  const abs = path.join(uploadRoot(), rel);
+  await fs.mkdir(path.dirname(abs), { recursive: true });
+  await fs.writeFile(abs, buf, { flag: "wx" });
+  return rel;
+}
 
 /** Enregistre une image validée par sa signature binaire ; retourne son chemin relatif. */
 export async function saveImage(
@@ -45,8 +64,10 @@ export async function saveImage(
  * publiquement : ils ne sont résolus qu'avec privateFiles = true, après contrôle des droits.
  */
 export function resolveStoragePath(rel: string, privateFiles = false): string | null {
-  const folders = privateFiles ? "payments" : "products|brand";
-  if (!new RegExp(`^(${folders})/[0-9a-f-]{36}\\.(png|jpg|webp)$`).test(rel)) return null;
+  const ok = privateFiles
+    ? /^payments\/[0-9a-f-]{36}\.(png|jpg|webp)$/.test(rel)
+    : /^(products|brand)\/[0-9a-f-]{36}\.(png|jpg|webp)$/.test(rel) || /^documents\/[0-9a-f-]{36}\.pdf$/.test(rel);
+  if (!ok) return null;
   const root = uploadRoot();
   const abs = path.resolve(root, rel);
   return abs.startsWith(root + path.sep) ? abs : null;

@@ -6,6 +6,14 @@ import { formatMRU, minorToInput } from "@/lib/money";
 import type { PaymentMethod, PaymentRow } from "@/server/services/payments";
 import { PAYMENT_RECORD_STATUS } from "@/server/services/payments";
 import { recordPaymentAction, recordRefundAction, verifyPaymentAction } from "@/app/admin/payment-actions";
+import { WhatsAppButton } from "./whatsapp-button";
+
+/** Message au client sur l'issue de la vérification (aucune donnée secrète). */
+function paymentMessage(p: PaymentRow) {
+  const target = p.order_number ? `la commande ${p.order_number}` : `la facture ${p.invoice_number ?? ""}`.trim();
+  const result = p.status === "confirmed" ? "a été confirmé. Merci !" : `n'a pas pu être confirmé${p.decision_note ? ` : ${p.decision_note}` : "."} Contactez-nous si besoin.`;
+  return `Bonjour ${p.customer_name ?? ""},\nVotre ${p.kind === "refund" ? "remboursement" : "paiement"} de ${formatMRU(p.amount_minor)} (${p.method_name}) pour ${target} ${result}\nNous ne vous demanderons jamais votre code PIN ni votre mot de passe.`;
+}
 
 const tone = { pending_verification: "amber", confirmed: "green", refused: "red", failed: "red" } as const;
 
@@ -31,6 +39,9 @@ export function PaymentItem({ p, canVerify, showTarget = false }: { p: PaymentRo
           <p className="text-xs text-slate-500">Transmis le {formatDateTime(p.submitted_at)} par {p.submitter_name ?? "—"}</p>
           {p.verified_at && <p className="text-xs text-slate-500">Traité le {formatDateTime(p.verified_at)} par {p.verifier_name ?? "—"}{p.decision_note ? ` — ${p.decision_note}` : ""}</p>}
           {p.has_proof && <a href={`/paiements/${p.id}/justificatif`} target="_blank" className="text-xs font-semibold text-brand-700 underline">Voir le justificatif</a>}
+          {showTarget && (p.status === "confirmed" || p.status === "refused") && (
+            <div className="mt-2"><WhatsAppButton phone={p.customer_phone} message={paymentMessage(p)} label="Informer le client sur WhatsApp" /></div>
+          )}
         </div>
         {canVerify && p.status === "pending_verification" && (
           <div className="flex flex-wrap gap-2">

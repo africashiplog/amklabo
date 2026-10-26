@@ -21,6 +21,9 @@ services:
       DATABASE_OWNER_URL: postgres://amklabo_owner:${OWNER_DB_PASSWORD}@db:5432/amklabo
       DATABASE_URL: postgres://amklabo_app:${APP_DB_PASSWORD}@db:5432/amklabo
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD requis}
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads   # import des images du catalogue
     depends_on: { db: { condition: service_healthy } }
 
   app:

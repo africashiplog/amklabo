@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ConfirmAction, Field, InlineAction } from "@/components/forms";
+import { ActionForm, ConfirmAction, Field, InlineAction, SubmitButton } from "@/components/forms";
 import { OrderStatusBadge, PaymentStatusBadge } from "@/components/order-badges";
 import { Alert, Badge, Card, PageHeader, Table, td, th } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
-import { formatMRU } from "@/lib/money";
+import { formatMRU, minorToInput } from "@/lib/money";
+import { orderMessage } from "@/lib/whatsapp";
+import { WhatsAppButton } from "@/components/whatsapp-button";
+import { getStoreSettings } from "@/server/services/settings";
 import { requirePermissionPage } from "@/server/current";
 import { can } from "@/server/permissions";
 import { INVOICE_STATUS } from "@/server/services/invoices";
@@ -16,6 +19,7 @@ import { adminListMethods, listPaymentsFor, orderAmountDue } from "@/server/serv
 import { query as dbQuery } from "@/server/db";
 import {
   changeOrderStatusAction, completeReturnAction, createInvoiceFromOrderAction, decideReturnAction, rejectCancelRequestAction,
+  setOrderShippingAction,
 } from "../../order-actions";
 
 const HINT: Partial<Record<string, string>> = {
@@ -33,12 +37,21 @@ export default async function AdminOrder({ params }: { params: Promise<{ id: str
   const { order: o, items, history, returns, invoices, reservations, canManage } = data;
   const next = TRANSITIONS[o.status];
   const canPayments = can(actor.roles, "payments.view");
-  const [payments, due, shipment, methods] = await Promise.all([
+  const [payments, due, shipment, methods, settings] = await Promise.all([
     canPayments ? listPaymentsFor(actor, { orderId: o.id }) : Promise.resolve([]),
     orderAmountDue(undefined, o.id),
     getShipmentForOrder(o.id),
     can(actor.roles, "settings.manage") ? adminListMethods(actor) : dbQuery<import("@/server/services/payments").PaymentMethod>("SELECT * FROM payment_methods ORDER BY sort_order"),
+    getStoreSettings(),
   ]);
+  const feePending = o.shipping_pending && o.status !== "cancelled";
+  const canSetShipping = canManage && ["new", "pending_confirmation"].includes(o.status)
+    && !invoices.some((i) => i.kind === "invoice" && i.status !== "cancelled")
+    && !payments.some((p) => p.status === "pending_verification" || p.status === "confirmed");
+  const waMessage = orderMessage({
+    storeName: settings.store_name, customerName: o.ship_recipient || o.customer_name, number: o.number, statusLabel: ORDER_STATUS[o.status],
+    totalMinor: o.total_minor, dueMinor: due, shippingPending: feePending, shippingMinor: o.shipping_minor,
+  });
   const methodName = methods.find((m) => m.code === o.payment_method_code)?.name ?? "—";
   const canInvoice = can(actor.roles, "invoices.manage") && !["new", "pending_confirmation", "cancelled"].includes(o.status)
     && !invoices.some((i) => i.kind === "invoice" && i.status !== "cancelled");
@@ -48,6 +61,11 @@ export default async function AdminOrder({ params }: { params: Promise<{ id: str
       <Link href="/admin/commandes" className="text-sm text-brand-700 hover:underline">← Commandes</Link>
       <PageHeader title={`Commande ${o.number}`}
         description={<><OrderStatusBadge status={o.status} /> <PaymentStatusBadge status={o.payment_status} /> · passée le {formatDateTime(o.placed_at)}</>} />
+      {feePending && (
+        <div className="mb-4"><Alert tone="warning">
+          <strong>Frais de livraison à fixer.</strong> Calculez-les selon la quantité et l&apos;adresse, puis enregistrez-les : le client est notifié du total. La commande ne peut pas être confirmée ni payée avant.
+        </Alert></div>
+      )}
       {o.cancel_requested_at && (
         <div className="mb-4"><Alert tone="warning">
           <strong>Demande d&apos;annulation du client</strong> ({formatDateTime(o.cancel_requested_at)}) : {o.cancel_request_reason}
@@ -139,6 +157,18 @@ export default async function AdminOrder({ params }: { params: Promise<{ id: str
         </div>
 
         <div className="space-y-6">
+          {canSetShipping && (
+            <Card className="p-5">
+              <h2 className="mb-2 font-semibold">Frais de livraison</h2>
+              <ActionForm action={setOrderShippingAction}>
+                <input type="hidden" name="orderId" value={o.id} />
+                <Field name="shipping" label="Montant (MRU)" inputMode="decimal" required defaultValue={feePending ? "" : minorToInput(o.shipping_minor)}
+                  hint="selon la quantité et l'adresse" />
+                <Field name="note" label="Précision pour le client (facultatif)" />
+                <SubmitButton size="sm">{feePending ? "Fixer les frais" : "Corriger les frais"}</SubmitButton>
+              </ActionForm>
+            </Card>
+          )}
           {canManage && next.length > 0 && (
             <Card className="space-y-2 p-5">
               <h2 className="font-semibold">Faire avancer la commande</h2>
@@ -164,6 +194,7 @@ export default async function AdminOrder({ params }: { params: Promise<{ id: str
             <h2 className="font-semibold">Client</h2>
             <p><Link href={`/admin/clients/${o.customer_id}`} className="font-medium text-brand-700 underline">{o.business_name ?? o.customer_name}</Link> · {o.customer_type === "business" ? "Professionnel" : "Particulier"}</p>
             <p className="text-slate-600">{o.customer_phone} · {o.customer_email}</p>
+            <WhatsAppButton phone={o.ship_phone || o.customer_phone} message={waMessage} />
             <h3 className="pt-2 font-semibold">Livraison — {o.zone_name}</h3>
             <p>{o.ship_recipient} · {o.ship_phone}</p>
             <p className="text-slate-600">{o.ship_line1}{o.ship_district ? `, ${o.ship_district}` : ""}, {o.ship_city}</p>
@@ -173,8 +204,8 @@ export default async function AdminOrder({ params }: { params: Promise<{ id: str
           <Card className="space-y-1 p-5 text-sm">
             <p className="flex justify-between"><span>Sous-total</span><span>{formatMRU(o.subtotal_minor)}</span></p>
             {o.discount_minor > 0 && <p className="flex justify-between text-leaf-700"><span>dont remises</span><span>{formatMRU(o.discount_minor)}</span></p>}
-            <p className="flex justify-between"><span>Livraison</span><span>{formatMRU(o.shipping_minor)}</span></p>
-            <p className="flex justify-between border-t border-slate-100 pt-1 text-base font-bold"><span>Total</span><span>{formatMRU(o.total_minor)}</span></p>
+            <p className="flex justify-between"><span>Livraison</span><span>{feePending ? "à fixer" : formatMRU(o.shipping_minor)}</span></p>
+            <p className="flex justify-between border-t border-slate-100 pt-1 text-base font-bold"><span>{feePending ? "Total produits" : "Total"}</span><span>{formatMRU(o.total_minor)}</span></p>
           </Card>
           <Card className="space-y-2 p-5 text-sm">
             <h2 className="font-semibold">Facturation</h2>

@@ -102,7 +102,7 @@ export default async function HomePage() {
                 {zones.map((z) => (
                   <li key={z.id} className="flex justify-between gap-2">
                     <span>{z.name}</span>
-                    <span className="font-medium">{z.fee_minor === 0 ? "Gratuite" : formatMRU(z.fee_minor)}</span>
+                    <span className="font-medium">{z.fee_mode === "manual" ? "Selon la quantité et l'adresse" : z.fee_minor === 0 ? "Gratuite" : formatMRU(z.fee_minor)}</span>
                   </li>
                 ))}
               </ul>

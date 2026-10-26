@@ -1,7 +1,7 @@
 # AMKLABO — Medical & Laboratory
 
 Plateforme e-commerce (détail et gros) de matériel médical et de laboratoire pour la Mauritanie.
-**État : Phases 1 à 5 terminées** (fondation ; clients, prix, stock ; commandes, factures ; paiements, livraisons ; rapports, sécurité, déploiement).
+**État : Phases 1 à 5 terminées** (fondation ; clients, prix, stock ; commandes, factures ; paiements, livraisons ; rapports, sécurité, déploiement), puis configuration pour **AKM Labo** (voir [Configuration AKM Labo](#configuration-akm-labo)).
 
 Documents : [Déploiement et exploitation](DEPLOIEMENT.md) · [Revue de sécurité](docs/SECURITE.md) · [Recette (critères d'acceptation)](docs/RECETTE.md)
 
@@ -56,13 +56,14 @@ Tous les prix sont calculés côté serveur ; un prix venant du navigateur n'est
 
 ### Commandes (`src/server/services/orders.ts`)
 - Panier réservé aux clients connectés. À la validation, le serveur recalcule prix, remises et frais de livraison (zone de l'adresse, seuil de gratuité). Si le total diffère de celui affiché, la commande est refusée avec le nouveau montant.
+- **Frais de livraison manuels** (zone en mode « frais fixés manuellement ») : la commande est passée sans frais (« Frais de livraison calculés par notre équipe ») ; l'équipe fixe les frais selon la quantité et l'adresse sur la fiche de la commande, le total est mis à jour et le client notifié. Tant que les frais ne sont pas fixés, la commande ne peut être ni confirmée (contrôle serveur **et** contrainte en base) ni payée. Les frais ne sont plus modifiables après confirmation, facture ou paiement déclaré.
 - Clé d'idempotence : un double clic ou un renvoi du formulaire ne crée qu'une commande.
 - Réservation du stock dans la même transaction (FEFO, verrou des lots). `CHECK (qty_reserved <= qty_on_hand)` en base : aucune survente, même pour des commandes simultanées (testé).
 - Les lignes de commande conservent nom, référence, unité, prix appliqué, prix public et règle tarifaire au moment de l'achat.
 - Transitions : Nouvelle → En attente de confirmation → Confirmée → En préparation → Prête à expédier → En livraison → Livrée ; annulation possible jusqu'à « En préparation ». Le stock sort physiquement au passage à « Prête à expédier ».
 - Le client annule lui-même avant confirmation, puis fait une demande d'annulation (acceptée ou refusée par l'équipe). Les retours sont possibles dans le délai configuré après livraison ; la remise en stock est facultative.
 - Les statuts de commande et de paiement (`payment_status`) sont distincts ; la livraison aura le sien en Phase 4.
-- Notifications internes à chaque changement (aucun e-mail ni SMS configuré).
+- Notifications internes à chaque changement (aucun e-mail ni SMS configuré). Boutons **WhatsApp** pour l'équipe (fiche commande, paiement traité, livraison) : ils ouvrent WhatsApp avec un message prérempli au numéro du client (indicatif 222 ajouté aux numéros à 8 chiffres) ; l'envoi reste fait par la personne, depuis le téléphone de la boutique.
 
 ### Factures (`src/server/services/invoices.ts`)
 - Brouillon (depuis une commande confirmée, ou manuel) → émission. Le numéro définitif `FAC-AAAA-NNNN` (avoirs : `AV-…`) est attribué à l'émission et les coordonnées du magasin et du client sont figées.
@@ -137,25 +138,42 @@ cp .env.example .env            # renseigner les mots de passe
 npm run db:migrate              # schéma + rôle amklabo_app + droits
 npm run db:seed                 # paramètres, 11 catégories, zone Nouakchott (inactive), pages
 npm run admin:create -- --email vous@domaine.mr --name "Votre nom"
+npm run config:akmlabo          # configuration AKM Labo (voir ci-dessous) — facultatif
+npm run catalogue:import        # 53 produits en brouillon + images d'illustration — facultatif
 npm run dev                     # http://localhost:3000
 ```
 
 ## Tests
 ```bash
-npm test                        # 123 tests d'intégration sur la base amklabo_test (réinitialisée à chaque lancement)
+npm test                        # 128 tests d'intégration sur la base amklabo_test (réinitialisée à chaque lancement)
 npm run build && <démarrer le serveur sur la base de test, port 3100>
-BASE_URL=http://localhost:3100 ADMIN_EMAIL=… ADMIN_PASSWORD=… npm run test:e2e   # 52 étapes Chromium
+BASE_URL=http://localhost:3100 ADMIN_EMAIL=… ADMIN_PASSWORD=… npm run test:e2e   # 54 étapes Chromium
 ```
 La base `amklabo_test` doit exister (même propriétaire, mêmes extensions).
 
 ## Déploiement
 Voir **[DEPLOIEMENT.md](DEPLOIEMENT.md)** : Docker Compose (PostgreSQL et application), HTTPS avec Caddy, sauvegardes et restauration, maintenance, mises à jour, supervision (`/api/sante`) et liste de mise en service.
 
+## Configuration AKM Labo
+
+Informations communiquées par le propriétaire, appliquées par `npm run config:akmlabo` (idempotent, journalisé, tout reste modifiable dans l'administration) :
+
+| Élément | Valeur |
+|---|---|
+| Raison sociale | AKM Labo |
+| NIF | laissé vide (à saisir dans Paramètres une fois confirmé) |
+| Paiements | espèces à la livraison ; Bankily, Masrivi, Sedad, Bimbank et Click sur le compte marchand **36608028**, chaque paiement étant vérifié manuellement |
+| Livraison | zone Nouakchott active, frais fixés manuellement par l'équipe selon la quantité et l'adresse |
+| Notifications client | espace client + boutons WhatsApp pour l'équipe (pas d'envoi automatique) |
+| Langue / connexion | français uniquement ; pas de double authentification |
+
+**Catalogue de départ** (`npm run catalogue:import`) : 53 types de produits génériques (`db/catalogue-brouillon.json`) créés en **brouillon**, prix 0, sans marque ni caractéristiques : ils ne peuvent pas être publiés avant la saisie du prix. Chacun reçoit une **image d'illustration générée** (`db/catalogue-images.json`), signalée sur la fiche produit (« Image d'illustration — le produit livré peut différer ») et dans l'administration ; à remplacer par de vraies photos. Le script télécharge les images : le serveur doit pouvoir joindre `d8j0ntlcm91z4.cloudfront.net` (sinon il les signale et peut être relancé). Avant publication : prix, marque, conditionnement, caractéristiques vérifiées, puis entrée en stock avec les vrais lots et dates de péremption.
+
+**Pages juridiques en PDF** : *Administration → Pages de contenu → (page) → Document officiel (PDF)*. Le PDF (5 Mo max, signature vérifiée) est proposé au téléchargement en haut de la page publique.
+
 ## Ce que doit fournir AMKLABO
-- Coordonnées, informations de facturation (raison sociale, NIF, RC) : *Administration → Paramètres*.
-- Textes des CGV, confidentialité, livraison/retours, à propos (à faire valider juridiquement) : *Pages de contenu*.
-- Frais de livraison de Nouakchott, puis activation de la zone (la commande en ligne est impossible tant qu'aucune zone n'est active).
-- Comptes marchands officiels et instructions de chaque moyen de paiement (Administration → Moyens de paiement), puis activation.
+- Coordonnées (téléphone, WhatsApp, e-mail, adresse), NIF et RC : *Administration → Paramètres*.
+- Les PDF des CGV, de la politique de confidentialité, de la politique de livraison et retours et de la page « À propos » : *Pages de contenu*.
 - Comptes des livreurs (Utilisateurs et rôles → rôle Livreur).
 - Régime fiscal (taxe incluse ou non), échéance des factures, délai de retour, et validation du modèle de facture.
 - Le fichier source du logo en haute résolution / vectoriel si disponible (le logo actuel est celui fourni, recadré de ses marges blanches uniquement ; l'original est dans `public/brand/logo-original.webp`).

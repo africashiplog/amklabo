@@ -20,6 +20,7 @@ export default async function AdminOrders({ searchParams }: { searchParams: Prom
           <Link key={k} href={`/admin/commandes?statut=${k}`}
             className={`rounded-full px-3 py-1.5 font-medium ring-1 ${status === k && !sp.signal ? "bg-brand-700 text-white ring-brand-700" : "bg-white text-slate-700 ring-slate-300"}`}>{label}</Link>
         ))}
+        <Link href="/admin/commandes?statut=all&signal=shipping" className={`rounded-full px-3 py-1.5 font-medium ring-1 ${sp.signal === "shipping" ? "bg-amber-600 text-white ring-amber-600" : "bg-white text-amber-800 ring-amber-300"}`}>Frais de livraison à fixer</Link>
         <Link href="/admin/commandes?statut=all&signal=cancel_request" className={`rounded-full px-3 py-1.5 font-medium ring-1 ${sp.signal === "cancel_request" ? "bg-amber-600 text-white ring-amber-600" : "bg-white text-amber-800 ring-amber-300"}`}>Demandes d&apos;annulation</Link>
         <Link href="/admin/commandes?statut=all&signal=return" className={`rounded-full px-3 py-1.5 font-medium ring-1 ${sp.signal === "return" ? "bg-amber-600 text-white ring-amber-600" : "bg-white text-amber-800 ring-amber-300"}`}>Retours en cours</Link>
       </nav>
@@ -39,6 +40,7 @@ export default async function AdminOrders({ searchParams }: { searchParams: Prom
                 <td className={`${td} whitespace-nowrap`}>{formatMRU(o.total_minor)}</td>
                 <td className={td}>
                   <OrderStatusBadge status={o.status} />
+                  {o.shipping_pending && o.status !== "cancelled" && <div className="mt-1"><Badge tone="amber">Frais à fixer</Badge></div>}
                   {o.cancel_requested_at && <div className="mt-1"><Badge tone="amber">Annulation demandée</Badge></div>}
                   {o.open_return && <div className="mt-1"><Badge tone="amber">Retour</Badge></div>}
                 </td>

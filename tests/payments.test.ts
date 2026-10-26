@@ -6,7 +6,7 @@ import { createProduct } from "@/server/services/catalog";
 import { saveMyAddress } from "@/server/services/customer-account";
 import { assignShipment, completeDelivery, failDelivery, getShipment, listMyDeliveries, startDelivery } from "@/server/services/deliveries";
 import { adminGetInvoice, cancelInvoice, createInvoiceFromOrder, issueInvoice } from "@/server/services/invoices";
-import { addToCart, changeOrderStatus, getMyOrder, placeOrder } from "@/server/services/orders";
+import { addToCart, adminListOrders, changeOrderStatus, getMyOrder, placeOrder, setOrderShipping } from "@/server/services/orders";
 import {
   derivePaymentStatus, listMyOrderPayments, recordPayment, recordRefund, saveMethod, submitPayment, verifyPayment,
 } from "@/server/services/payments";
@@ -21,12 +21,12 @@ async function enableBankily(admin: A) {
   await saveMethod(admin, "bankily", { isActive: true, merchantAccount: "COMPTE-TEST-0000", instructions: "Instructions de test", referenceLabel: "Numéro de transaction" });
 }
 
-async function order(method = "cash_on_delivery", qty = 2) {
+async function order(method = "cash_on_delivery", qty = 2, feeMode: "fixed" | "manual" = "fixed") {
   const admin = await makeActor(["admin"]);
   if (method === "bankily") await enableBankily(admin);
   const { id: productId } = await createProduct(admin, baseProduct(await firstCategoryId(), { retailPrice: "1000", trackLots: false }));
   await recordEntry(admin, { productId, type: "manual_in", quantity: "20", lotNumber: "", expiryDate: "", supplierId: null, unitCost: "", reason: "Init" });
-  await saveZone(admin, null, { name: `Zone ${randomUUID().slice(0, 6)}`, city: "Nouakchott", fee: "100", freeThreshold: "", isActive: true });
+  await saveZone(admin, null, { name: `Zone ${randomUUID().slice(0, 6)}`, city: "Nouakchott", feeMode, fee: feeMode === "manual" ? "" : "100", freeThreshold: "", isActive: true });
   const zoneId = (await pool().query("SELECT id FROM delivery_zones WHERE is_active ORDER BY created_at DESC LIMIT 1")).rows[0].id;
   const c = await makeCustomer();
   await saveMyAddress(c, null, { label: "Maison", recipient: "Client Paiement", phone: "+222 22 00 00 03", city: "Nouakchott", line1: "Rue 3", zoneId, isDefault: true });
@@ -46,6 +46,43 @@ describe("moyens de paiement", () => {
   it("refuse une commande avec un moyen de paiement inactif", async () => {
     await pool().query("UPDATE payment_methods SET is_active = false WHERE code = 'sedad'");
     await expect(order("sedad")).rejects.toThrow(/moyen de paiement/);
+  });
+});
+
+describe("frais de livraison fixés manuellement", () => {
+  it("commande sans frais, confirmation et paiement bloqués jusqu'à leur saisie, puis total mis à jour et client notifié", async () => {
+    const { admin, c, id, number, shippingPending } = await order("bankily", 2, "manual");
+    expect(shippingPending).toBe(true);
+    let o = (await getMyOrder(c, number))!.order;
+    expect([o.subtotal_minor, o.shipping_minor, o.total_minor, o.shipping_pending]).toEqual([200000, 0, 200000, true]);
+    expect((await adminListOrders(admin, { flag: "shipping", status: "all" })).items.some((x) => x.id === id)).toBe(true);
+    // Ni confirmation, ni paiement tant que les frais ne sont pas fixés (contrôle serveur et contrainte en base).
+    await expect(changeOrderStatus(admin, id, "confirmed", null)).rejects.toThrow(/frais de livraison/);
+    await expect(submitPayment(c, number, { reference: ref() })).rejects.toThrow(/frais de livraison/);
+    await expect(recordPayment(admin, { orderId: id }, { methodCode: "cash_on_delivery", amount: "100", reference: "", note: "" })).rejects.toThrow(/frais de livraison/);
+    await expect(pool().query("UPDATE orders SET status = 'confirmed' WHERE id = $1", [id])).rejects.toThrow(/orders_shipping_pending_status/);
+    // Seule l'équipe des commandes fixe les frais.
+    await expect(setOrderShipping(c, id, 15000, null)).rejects.toThrow();
+    await expect(setOrderShipping(await makeActor(["accountant"]), id, 15000, null)).rejects.toThrow(ForbiddenError);
+    await expect(setOrderShipping(admin, id, -1, null)).rejects.toThrow(UserError);
+    await setOrderShipping(admin, id, 15000, "2 cartons, Tevragh Zeina");
+    o = (await getMyOrder(c, number))!.order;
+    expect([o.shipping_minor, o.total_minor, o.shipping_pending]).toEqual([15000, 215000, false]);
+    const n = (await pool().query("SELECT title, body FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1", [c.id])).rows[0];
+    expect(n.title).toMatch(/frais de livraison fixés/);
+    expect(n.body).toMatch(/Total à payer : 2\s150\sMRU/);
+    // Le paiement porte sur le total définitif ; les frais ne sont alors plus modifiables.
+    await submitPayment(c, number, { reference: ref() });
+    expect((await listMyOrderPayments(c, number))[0].amount_minor).toBe(215000);
+    await expect(setOrderShipping(admin, id, 0, null)).rejects.toThrow(/paiement/);
+    await changeOrderStatus(admin, id, "confirmed", null);
+    expect((await getMyOrder(c, number))!.order.status).toBe("confirmed");
+  });
+
+  it("les frais ne peuvent plus être modifiés après confirmation", async () => {
+    const { admin, id } = await order("cash_on_delivery", 1);
+    await changeOrderStatus(admin, id, "confirmed", null);
+    await expect(setOrderShipping(admin, id, 5000, null)).rejects.toThrow(/avant la confirmation/);
   });
 });
 

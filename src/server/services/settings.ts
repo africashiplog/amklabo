@@ -4,7 +4,7 @@ import { assertCan, type Actor } from "../actor";
 import { audit } from "../audit";
 import { query, queryOne, tx } from "../db";
 import { UserError } from "../errors";
-import { deleteStoredFile, saveImage } from "../storage";
+import { deleteStoredFile, saveImage, savePdf } from "../storage";
 
 export type StoreSettings = {
   store_name: string;
@@ -114,7 +114,7 @@ export const CONTENT_PAGES = {
 } as const;
 export type ContentSlug = keyof typeof CONTENT_PAGES;
 
-export type ContentPage = { slug: string; title: string; body: string; updated_at: Date };
+export type ContentPage = { slug: string; title: string; body: string; updated_at: Date; pdf_path: string | null };
 
 export async function getContentPage(slug: ContentSlug) {
   return queryOne<ContentPage>("SELECT * FROM content_pages WHERE slug = $1", [slug]);
@@ -142,4 +142,26 @@ export async function updateContentPage(actor: Actor | null, slug: string, input
     );
     await audit(actor, "content_page.update", "content_page", slug, { before, after: d }, db);
   });
+}
+
+/** Joint (ou retire, file = null) le document PDF officiel d'une page, proposé au téléchargement. */
+export async function setContentPagePdf(actor: Actor | null, slug: string, file: File | null) {
+  assertCan(actor, "settings.manage");
+  if (!(slug in CONTENT_PAGES)) throw new UserError("Page inconnue.");
+  const rel = file ? await savePdf(file) : null;
+  let previous: string | null = null;
+  try {
+    await tx(async (db) => {
+      const before = await queryOne<{ pdf_path: string | null }>("SELECT pdf_path FROM content_pages WHERE slug = $1 FOR UPDATE", [slug], db);
+      if (!before) throw new UserError("Page inconnue.");
+      previous = before.pdf_path;
+      await db.query("UPDATE content_pages SET pdf_path = $2, updated_by = $3 WHERE slug = $1", [slug, rel, actor.id]);
+      await audit(actor, rel ? "content_page.pdf_upload" : "content_page.pdf_remove", "content_page", slug,
+        { before, after: { pdf_path: rel, size: file?.size ?? null } }, db);
+    });
+  } catch (err) {
+    if (rel) await deleteStoredFile(rel);
+    throw err;
+  }
+  if (previous) await deleteStoredFile(previous);
 }

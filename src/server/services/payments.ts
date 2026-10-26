@@ -175,13 +175,14 @@ export async function submitPayment(
   let proofPath: string | null = null;
   try {
     return await tx(async (db) => {
-      const o = await queryOne<{ id: string; status: string; payment_method_code: string | null; customer_user: string }>(
-        `SELECT o.id, o.status, o.payment_method_code, c.user_id AS customer_user
+      const o = await queryOne<{ id: string; status: string; payment_method_code: string | null; customer_user: string; shipping_pending: boolean }>(
+        `SELECT o.id, o.status, o.payment_method_code, c.user_id AS customer_user, o.shipping_pending
            FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.number = $1 AND c.user_id = $2 FOR UPDATE OF o`,
         [orderNumber, actor.id], db,
       );
       if (!o) throw new UserError("Commande introuvable.");
       if (["cancelled", "returned"].includes(o.status)) throw new UserError("Cette commande n'attend pas de paiement.");
+      if (o.shipping_pending) throw new UserError("Les frais de livraison de cette commande ne sont pas encore fixés : attendez le total définitif avant de payer.");
       const m = o.payment_method_code
         ? await queryOne<PaymentMethod>("SELECT * FROM payment_methods WHERE code = $1", [o.payment_method_code], db)
         : null;
@@ -290,9 +291,10 @@ export async function recordPayment(actor: Actor | null, target: { orderId?: str
       if (!m) throw new UserError("Moyen de paiement inconnu.", { methodCode: "Inconnu" });
       if (m.kind === "mobile_money" && !d.reference) throw new UserError("La référence de transaction est obligatoire.", { reference: "Requise" });
       if (target.orderId) {
-        const o = await queryOne<{ status: string }>("SELECT status FROM orders WHERE id = $1 FOR UPDATE", [target.orderId], db);
+        const o = await queryOne<{ status: string; shipping_pending: boolean }>("SELECT status, shipping_pending FROM orders WHERE id = $1 FOR UPDATE", [target.orderId], db);
         if (!o) throw new UserError("Commande introuvable.");
         if (o.status === "cancelled") throw new UserError("Commande annulée.");
+        if (o.shipping_pending) throw new UserError("Fixez d'abord les frais de livraison de cette commande.");
       } else {
         const inv = await queryOne<{ status: string; kind: string; order_id: string | null }>(
           "SELECT status, kind, order_id FROM invoices WHERE id = $1 FOR UPDATE", [target.invoiceId], db,
@@ -364,7 +366,7 @@ export type PaymentRow = {
   invoice_number: string | null; method_code: string; method_name: string; amount_minor: number; status: keyof typeof PAYMENT_RECORD_STATUS;
   transaction_reference: string | null; payer_phone: string | null; has_proof: boolean; note: string | null; submitted_at: Date;
   submitter_name: string | null; verified_at: Date | null; verifier_name: string | null; decision_note: string | null;
-  customer_name: string | null; due_total_minor: number | null;
+  customer_name: string | null; due_total_minor: number | null; customer_phone: string | null;
 };
 
 const PAYMENT_SELECT = `
@@ -372,7 +374,8 @@ const PAYMENT_SELECT = `
          m.name AS method_name, p.amount_minor, p.status, p.transaction_reference, p.payer_phone, p.proof_path IS NOT NULL AS has_proof,
          p.note, p.submitted_at, ps.full_name AS submitter_name, p.verified_at, pv.full_name AS verifier_name, p.decision_note,
          coalesce(o.business_name, o.customer_name, i.buyer_business, i.buyer_name) AS customer_name,
-         coalesce(o.total_minor, i.total_minor) AS due_total_minor
+         coalesce(o.total_minor, i.total_minor) AS due_total_minor,
+         coalesce(o.ship_phone, o.customer_phone, i.buyer_phone) AS customer_phone
     FROM payments p
     JOIN payment_methods m ON m.code = p.method_code
     LEFT JOIN orders o ON o.id = p.order_id

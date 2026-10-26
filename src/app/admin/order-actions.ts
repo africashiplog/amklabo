@@ -8,7 +8,9 @@ import {
   addInvoiceLine, cancelInvoice, createCreditNote, createInvoiceFromOrder, createManualInvoice, deleteDraft, issueInvoice,
   setInvoiceLineQuantity, updateDraft,
 } from "@/server/services/invoices";
-import { changeOrderStatus, completeReturn, decideReturn, rejectCancelRequest, type OrderStatus } from "@/server/services/orders";
+import { changeOrderStatus, completeReturn, decideReturn, rejectCancelRequest, setOrderShipping, type OrderStatus } from "@/server/services/orders";
+import { parseMRU } from "@/lib/money";
+import { UserError } from "@/server/errors";
 
 const refresh = () => revalidatePath("/", "layout");
 
@@ -125,4 +127,14 @@ export async function deleteDraftAction(_: ActionState, fd: FormData): Promise<A
   });
   if (state.ok) redirect("/admin/factures?supprime=1");
   return state;
+}
+
+export async function setOrderShippingAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  return runAction(async () => {
+    const amount = parseMRU(formString(fd, "shipping"));
+    if (amount === null) throw new UserError("Montant des frais invalide.", { shipping: "Montant invalide" });
+    await setOrderShipping(await getActor(), formString(fd, "orderId"), amount, formOptional(fd, "note"));
+    refresh();
+    return "Frais de livraison enregistrés, le client est notifié.";
+  });
 }

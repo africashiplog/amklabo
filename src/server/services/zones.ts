@@ -13,6 +13,7 @@ export type DeliveryZone = {
   free_shipping_threshold_minor: number | null;
   is_active: boolean;
   sort_order: number;
+  fee_mode: "fixed" | "manual";
 };
 
 export async function listActiveZones() {
@@ -38,9 +39,13 @@ const money = (required: boolean) =>
 export const zoneSchema = z.object({
   name: z.string().trim().min(2).max(80),
   city: z.string().trim().min(2).max(80),
-  fee: money(true),
+  // Frais manuels : fixés par l'équipe pour chaque commande (quantité, adresse).
+  feeMode: z.enum(["fixed", "manual"]).default("fixed"),
+  fee: money(false),
   freeThreshold: money(false),
   isActive: z.boolean(),
+}).superRefine((d, ctx) => {
+  if (d.feeMode === "fixed" && d.fee === null) ctx.addIssue({ code: "custom", path: ["fee"], message: "Montant requis pour des frais fixes" });
 });
 
 export async function saveZone(actor: Actor | null, id: string | null, input: z.input<typeof zoneSchema>) {
@@ -52,17 +57,17 @@ export async function saveZone(actor: Actor | null, id: string | null, input: z.
         const before = await queryOne("SELECT * FROM delivery_zones WHERE id = $1 FOR UPDATE", [id], db);
         if (!before) throw new UserError("Zone introuvable.");
         const after = await queryOne(
-          `UPDATE delivery_zones SET name=$2, city=$3, fee_minor=$4, free_shipping_threshold_minor=$5, is_active=$6
+          `UPDATE delivery_zones SET name=$2, city=$3, fee_minor=$4, free_shipping_threshold_minor=$5, is_active=$6, fee_mode=$7
             WHERE id=$1 RETURNING *`,
-          [id, d.name, d.city, d.fee, d.freeThreshold, d.isActive],
+          [id, d.name, d.city, d.fee ?? 0, d.freeThreshold, d.isActive, d.feeMode],
           db,
         );
         await audit(actor, "delivery_zone.update", "delivery_zone", id, { before, after }, db);
       } else {
         const after = await queryOne<{ id: string }>(
-          `INSERT INTO delivery_zones (name, city, fee_minor, free_shipping_threshold_minor, is_active, sort_order)
-           VALUES ($1,$2,$3,$4,$5, coalesce((SELECT max(sort_order)+1 FROM delivery_zones),0)) RETURNING *`,
-          [d.name, d.city, d.fee, d.freeThreshold, d.isActive],
+          `INSERT INTO delivery_zones (name, city, fee_minor, free_shipping_threshold_minor, is_active, fee_mode, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6, coalesce((SELECT max(sort_order)+1 FROM delivery_zones),0)) RETURNING *`,
+          [d.name, d.city, d.fee ?? 0, d.freeThreshold, d.isActive, d.feeMode],
           db,
         );
         await audit(actor, "delivery_zone.create", "delivery_zone", after!.id, { after }, db);

@@ -61,7 +61,7 @@ export default async function CartPage({ searchParams }: { searchParams: Promise
             )}
             {cart.discountMinor > 0 && <p className="flex justify-between text-sm text-leaf-700"><span>Remises</span><span>−{formatMRU(cart.discountMinor)}</span></p>}
             <p className="flex justify-between text-lg font-bold"><span>Sous-total</span><span>{formatMRU(cart.subtotalMinor)}</span></p>
-            <p className="text-xs text-slate-500">Les frais de livraison sont calculés à l&apos;étape suivante selon votre adresse. Les prix sont recalculés par nos serveurs à la validation.</p>
+            <p className="text-xs text-slate-500">Les frais de livraison dépendent de la quantité et de votre adresse : ils sont indiqués à l&apos;étape suivante ou fixés par notre équipe après la commande. Les prix sont recalculés par nos serveurs à la validation.</p>
             {cart.canCheckout
               ? <LinkButton href="/commande" variant="success" className="w-full">Passer la commande</LinkButton>
               : <p className="rounded-lg bg-red-50 p-3 text-sm text-red-800">Corrigez les produits signalés pour continuer.</p>}

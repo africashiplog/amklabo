@@ -17,13 +17,14 @@ Revue réalisée sur le code de ce dépôt (Phases 1 à 5). Elle couvre l'applic
 | Injection SQL | requêtes paramétrées ; tri et regroupements limités à des listes fermées | test d'injection `catalog` ; revue de code |
 | XSS | rendu React échappé ; aucun HTML brut (`dangerouslySetInnerHTML` absent) ; textes saisis affichés en texte simple ; **CSP avec nonce par requête** et `strict-dynamic` | revue de code ; navigateur (aucune violation CSP) |
 | CSRF | Server Actions de Next.js (vérification de l'origine) ; cookie `SameSite=Lax` | — |
-| Fichiers téléversés | type vérifié par signature binaire (PNG, JPEG, WebP ; SVG refusé) ; 5 Mo maximum ; noms aléatoires ; chemins sous contrôle (aucune traversée) ; justificatifs de paiement **hors du dossier public**, servis après contrôle des droits | tests `unit` ; navigateur |
+| Fichiers téléversés | type vérifié par signature binaire (PNG, JPEG, WebP ; SVG refusé ; PDF `%PDF-` pour les pages juridiques uniquement) ; 5 Mo maximum ; noms aléatoires ; chemins sous contrôle (aucune traversée) ; justificatifs de paiement **hors du dossier public**, servis après contrôle des droits | tests `unit` ; navigateur |
 | Exports CSV | droits vérifiés ; export journalisé ; neutralisation de l'injection de formules (`=`, `+`, `-`, `@`) | tests `reports` |
 | Redirections | seules les redirections internes sont acceptées après connexion | revue de code |
 | Erreurs | aucune trace technique affichée à l'utilisateur ; journalisation serveur sans données personnelles inutiles | revue de code |
 | En-têtes | CSP, `X-Frame-Options: DENY`, `frame-ancestors 'none'`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, HSTS en production | navigateur |
 | Adresse IP | la dernière valeur de `X-Forwarded-For` (celle ajoutée par le proxy) est utilisée, ce qui empêche un client de la falsifier | revue de code |
-| Paiements | aucun code PIN ni mot de passe demandé ou stocké ; aucune confirmation automatique | tests `payments` |
+| Paiements | aucun code PIN ni mot de passe demandé ou stocké ; aucune confirmation automatique ; aucun paiement possible tant que les frais de livraison manuels ne sont pas fixés | tests `payments` |
+| WhatsApp | liens `wa.me` ouverts par l'équipe, aucun jeton ni API ; messages construits côté serveur à partir des données de la commande, rappel « jamais de code PIN » | tests `unit` |
 | Dépendances | `npm audit --omit=dev` : **0 vulnérabilité** après mise à jour de Next.js (15.5.4 → 15.5.28, faille critique corrigée), zod 4, sharp 0.35.5 et postcss 8.5.29 ; optimiseur d'images de Next désactivé (non utilisé) | `npm audit` |
 
 ## Corrections apportées pendant la revue

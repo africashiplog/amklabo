@@ -30,7 +30,7 @@ const browser = await chromium.launch();
 const ctx = await browser.newContext();
 const page = await ctx.newPage();
 const errors = [];
-page.on("pageerror", (e) => errors.push(e.message));
+page.on("pageerror", (e) => errors.push(`${page.url()} : ${e.message}`));
 const watchConsole = (p) => p.on("console", (m) => { if (m.type() === "error" && /Content Security Policy|Refused to/.test(m.text())) errors.push(`CSP: ${m.text()}`); });
 watchConsole(page);
 
@@ -99,7 +99,7 @@ await step("Un client n'a pas accès à l'administration", async () => {
 
 const admin = await browser.newContext();
 const ap = await admin.newPage();
-ap.on("pageerror", (e) => errors.push(e.message));
+ap.on("pageerror", (e) => errors.push(`${ap.url()} : ${e.message}`));
 watchConsole(ap);
 const sku = `E2E-${id}`.toUpperCase();
 
@@ -339,6 +339,7 @@ await step("Moyens de paiement : Bankily refusé sans compte marchand, puis acti
   await ap.getByText(/compte marchand officiel avant/).waitFor();
   await bankily.getByLabel("Numéro / compte marchand officiel").fill("COMPTE-TEST-E2E");
   await bankily.getByLabel("Instructions affichées au client").fill("Instructions de test uniquement.");
+  await bankily.getByLabel("Libellé de la référence demandée au client").fill("Numéro de transaction");
   await bankily.getByRole("button", { name: "Enregistrer" }).click();
   await ap.getByText("Moyen de paiement enregistré.").first().waitFor();
   const cod = ap.locator("div.rounded-xl", { has: ap.getByRole("heading", { name: "Paiement en espèces à la livraison", exact: true }) });
@@ -353,6 +354,7 @@ await step("Activation de la zone de livraison Nouakchott (frais 150 MRU)", asyn
   await ap.goto(`${BASE}/admin/livraison`);
   const card = ap.locator("div.rounded-xl", { has: ap.getByRole("heading", { name: "Nouakchott", exact: true }) }).first();
   await card.getByLabel("Frais de livraison (MRU)").fill("150");
+  await card.getByLabel(/Frais fixés manuellement/).uncheck();
   await card.getByLabel(/Zone active/).check();
   await card.getByRole("button", { name: "Enregistrer" }).click();
   await ap.getByText("Active · 150 MRU").first().waitFor();
@@ -514,7 +516,7 @@ await step("Affectation de la livraison (commande prête à expédier)", async (
 
 const dctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
 const dp = await dctx.newPage();
-dp.on("pageerror", (e) => errors.push(e.message));
+dp.on("pageerror", (e) => errors.push(`${dp.url()} : ${e.message}`));
 
 await step("Le livreur ne voit que ses livraisons, pas les commandes ni les clients", async () => {
   await login(dp, driverEmail, driverPassword);
@@ -604,6 +606,74 @@ await step("Refus motivé du paiement, communiqué au client", async () => {
   await page.goto(`${BASE}/compte/commandes/${bankilyOrder}`);
   await page.getByText("Transaction introuvable sur le compte").waitFor();
   await page.getByLabel("Numéro de transaction").waitFor(); // le client peut transmettre une nouvelle référence
+});
+
+// ------------------------------------------------- Frais de livraison manuels
+await step("Frais manuels : commande sans frais, fixés par l'équipe, client notifié du total", async () => {
+  await ap.goto(`${BASE}/admin/livraison`);
+  const card = ap.locator("div.rounded-xl", { has: ap.getByRole("heading", { name: "Nouakchott", exact: true }) }).first();
+  await card.getByLabel(/Frais fixés manuellement/).check();
+  await card.getByRole("button", { name: "Enregistrer" }).click();
+  await ap.getByText("Active · frais manuels").first().waitFor();
+
+  await page.goto(proProductUrl);
+  await page.getByLabel("Quantité").fill("1");
+  await page.getByRole("button", { name: "Ajouter au panier" }).click();
+  await page.getByText("Ajouté au panier.").waitFor();
+  await page.goto(`${BASE}/commande`);
+  await page.getByRole("radio", { name: /Laboratoire —/ }).check();
+  await page.getByText(/livraison calculée par notre équipe/).waitFor();
+  await page.getByRole("radio", { name: /^Paiement en espèces/ }).check();
+  await page.getByRole("button", { name: "Valider la commande" }).click();
+  await page.waitForURL(/confirmee=1/);
+  const num = page.url().match(/CMD-\d{4}-\d{4}/)[0];
+  assert.match(await page.locator("main").innerText(), /Livraison \(Nouakchott\)\s+à fixer/);
+
+  await ap.goto(`${BASE}/admin/commandes?statut=all&signal=shipping`);
+  await ap.getByRole("link", { name: num }).click();
+  await ap.getByText("Frais de livraison à fixer.").waitFor();
+  const wa = await ap.getByRole("link", { name: "Prévenir sur WhatsApp" }).getAttribute("href");
+  assert.match(wa, /^https:\/\/wa\.me\/22222334455\?text=/);
+  assert.match(decodeURIComponent(wa), new RegExp(num));
+  await ap.locator('input[name="shipping"]').fill("200");
+  await ap.getByRole("button", { name: "Fixer les frais" }).click();
+  await ap.getByText(/Frais de livraison enregistrés/).waitFor();
+
+  await page.reload();
+  const text = await page.locator("main").innerText();
+  assert.match(text, /Livraison \(Nouakchott\)\s+200 MRU/);
+  assert.doesNotMatch(text, /à fixer/);
+  await page.goto(`${BASE}/compte/notifications`);
+  await page.getByText(`Commande ${num} : frais de livraison fixés`).first().waitFor();
+
+  // Retour aux frais fixes pour la suite du parcours.
+  await ap.goto(`${BASE}/admin/livraison`);
+  await card.getByLabel(/Frais fixés manuellement/).uncheck();
+  await card.getByLabel("Frais de livraison (MRU)").fill("150");
+  await card.getByRole("button", { name: "Enregistrer" }).click();
+  await ap.getByText("Active · 150 MRU").first().waitFor();
+});
+
+await step("Page juridique : PDF officiel téléversé, téléchargeable par les visiteurs", async () => {
+  const pdf = path.join(shots, "cgv-test.pdf");
+  fs.writeFileSync(pdf, "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n");
+  await ap.goto(`${BASE}/admin/pages/conditions-generales`);
+  await ap.getByLabel(/Téléverser le PDF/).setInputFiles(pdf);
+  await ap.getByRole("button", { name: "Publier le PDF" }).click();
+  await ap.getByText("Document PDF publié.").waitFor();
+  const anon = await browser.newContext();
+  const ap2 = await anon.newPage();
+  await ap2.goto(`${BASE}/conditions-generales`);
+  const href = await ap2.getByRole("link", { name: /Document officiel/ }).getAttribute("href");
+  const res = await anon.request.get(`${BASE}${href}`);
+  assert.equal(res.headers()["content-type"], "application/pdf");
+  assert.ok((await res.body()).toString("ascii", 0, 5) === "%PDF-");
+  await anon.close();
+  // Un fichier non PDF est refusé.
+  await ap.reload();
+  await ap.getByLabel(/Remplacer le PDF/).setInputFiles(path.resolve("public/brand/icon.png"));
+  await ap.getByRole("button", { name: "Publier le PDF" }).click();
+  await ap.getByText(/seul un fichier PDF est accepté/).waitFor();
 });
 
 // ---------------------------------------------------------------- Phase 5

@@ -12,10 +12,11 @@ function ZoneForm({ zone }: { zone?: DeliveryZone }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <Field name="name" label="Nom de la zone" defaultValue={zone?.name} required />
         <Field name="city" label="Ville" defaultValue={zone?.city ?? "Nouakchott"} required />
-        <Field name="fee" label="Frais de livraison (MRU)" inputMode="decimal" defaultValue={zone ? minorToInput(zone.fee_minor) : ""} required />
+        <Field name="fee" label="Frais de livraison (MRU)" hint="(si frais fixes)" inputMode="decimal" defaultValue={zone && zone.fee_mode === "fixed" ? minorToInput(zone.fee_minor) : ""} />
         <Field name="freeThreshold" label="Gratuite à partir de (MRU)" hint="(facultatif)" inputMode="decimal"
           defaultValue={zone?.free_shipping_threshold_minor != null ? minorToInput(zone.free_shipping_threshold_minor) : ""} />
       </div>
+      <Checkbox name="manualFee" label="Frais fixés manuellement par l'équipe pour chaque commande (selon la quantité et l'adresse)" defaultChecked={zone?.fee_mode === "manual"} />
       <Checkbox name="isActive" label="Zone active (proposée aux clients)" defaultChecked={zone?.is_active} />
       <SubmitButton size="sm">{zone ? "Enregistrer" : "Ajouter la zone"}</SubmitButton>
     </ActionForm>
@@ -27,13 +28,13 @@ export default async function AdminZones() {
   const zones = await adminListZones(actor);
   return (
     <>
-      <PageHeader title="Zones de livraison" description="Les frais seront appliqués et recalculés côté serveur lors de la commande (Phase 3)." />
+      <PageHeader title="Zones de livraison" description="Frais fixes : appliqués et recalculés côté serveur à la commande. Frais manuels : l'équipe les fixe sur chaque commande avant de la confirmer ; le client est notifié du total." />
       <div className="grid gap-6 lg:grid-cols-2">
         {zones.map((z) => (
           <Card key={z.id} className="p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="font-semibold">{z.name}</h2>
-              {z.is_active ? <Badge tone="green">Active · {formatMRU(z.fee_minor)}</Badge> : <Badge>Inactive</Badge>}
+              {z.is_active ? <Badge tone="green">Active · {z.fee_mode === "manual" ? "frais manuels" : formatMRU(z.fee_minor)}</Badge> : <Badge>Inactive</Badge>}
             </div>
             <ZoneForm zone={z} />
           </Card>

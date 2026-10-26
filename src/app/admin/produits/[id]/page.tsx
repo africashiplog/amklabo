@@ -84,6 +84,7 @@ export default async function EditProduct({ params, searchParams }: { params: Pr
                   <li key={img.id} className="space-y-1">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={mediaUrl(img.storage_path)} alt={img.alt ?? ""} className="aspect-square w-full rounded-lg border border-slate-200 bg-white object-contain" />
+                    {img.is_illustration && <p className="text-xs font-medium text-amber-700">Illustration générée — à remplacer par une vraie photo</p>}
                     {i === 0 ? <p className="text-xs font-medium text-leaf-700">Image principale</p>
                       : <InlineAction action={coverImageAction} fields={{ imageId: img.id }}>Principale</InlineAction>}
                     <ConfirmAction action={deleteProductImageAction} fields={{ imageId: img.id }} label="Supprimer"

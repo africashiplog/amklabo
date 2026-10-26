@@ -35,7 +35,8 @@ export default async function MyOrder({ params, searchParams }: Props) {
     listMyOrderPayments(actor, number), getShipmentForOrder(o.id), listActiveMethods(), orderAmountDue(undefined, o.id),
   ]);
   const method = methods.find((m) => m.code === o.payment_method_code) ?? null;
-  const canPay = method?.kind === "mobile_money" && due > 0 && !["cancelled", "returned"].includes(o.status);
+  const feePending = o.shipping_pending && o.status !== "cancelled";
+  const canPay = method?.kind === "mobile_money" && due > 0 && !feePending && !["cancelled", "returned"].includes(o.status);
   const canReturn = o.status === "delivered" && !returns.some((r) => r.status === "requested" || r.status === "accepted");
 
   return (
@@ -47,7 +48,8 @@ export default async function MyOrder({ params, searchParams }: Props) {
         <PaymentStatusBadge status={o.payment_status} />
       </div>
       <p className="mt-1 text-sm text-slate-600">Passée le {formatDateTime(o.placed_at)}</p>
-      {confirmee && <div className="mt-4"><Alert tone="success">Merci ! Votre commande a bien été enregistrée. Notre équipe va la confirmer.{canPay ? " Vous pouvez dès maintenant effectuer le paiement et transmettre sa référence ci-dessous." : ""}</Alert></div>}
+      {confirmee && <div className="mt-4"><Alert tone="success">Merci ! Votre commande a bien été enregistrée. Notre équipe va la confirmer.{feePending ? " Les frais de livraison seront calculés selon la quantité et votre adresse : vous serez notifié du total à payer." : ""}{canPay ? " Vous pouvez dès maintenant effectuer le paiement et transmettre sa référence ci-dessous." : ""}</Alert></div>}
+      {feePending && !confirmee && <div className="mt-4"><Alert tone="info">Frais de livraison en cours de calcul par notre équipe (selon la quantité et l&apos;adresse). Le total à payer vous sera notifié avant la confirmation.</Alert></div>}
       {o.cancel_requested_at && <div className="mt-4"><Alert tone="warning">Demande d&apos;annulation envoyée le {formatDateTime(o.cancel_requested_at)} — en attente de réponse.</Alert></div>}
       {o.status === "cancelled" && o.cancel_reason && <div className="mt-4"><Alert tone="error">Commande annulée : {o.cancel_reason}</Alert></div>}
 
@@ -94,8 +96,8 @@ export default async function MyOrder({ params, searchParams }: Props) {
           <Card className="space-y-2 p-5 text-sm">
             <p className="flex justify-between"><span>Sous-total</span><span>{formatMRU(o.subtotal_minor)}</span></p>
             {o.discount_minor > 0 && <p className="flex justify-between text-leaf-700"><span>dont remises</span><span>{formatMRU(o.discount_minor)}</span></p>}
-            <p className="flex justify-between"><span>Livraison ({o.zone_name})</span><span>{formatMRU(o.shipping_minor)}</span></p>
-            <p className="flex justify-between border-t border-slate-100 pt-2 text-base font-bold"><span>Total</span><span>{formatMRU(o.total_minor)}</span></p>
+            <p className="flex justify-between"><span>Livraison ({o.zone_name})</span><span>{feePending ? "à fixer" : formatMRU(o.shipping_minor)}</span></p>
+            <p className="flex justify-between border-t border-slate-100 pt-2 text-base font-bold"><span>{feePending ? "Total produits" : "Total"}</span><span>{formatMRU(o.total_minor)}</span></p>
           </Card>
           <Card className="p-5 text-sm">
             <h2 className="mb-2 font-semibold">Livraison</h2>
@@ -119,7 +121,8 @@ export default async function MyOrder({ params, searchParams }: Props) {
             {payments.some((p) => p.status === "pending_verification") && (
               <p className="rounded-lg bg-amber-50 p-3 text-amber-900">Votre paiement a bien été transmis : il est en cours de vérification par notre équipe. Vous serez notifié du résultat.</p>
             )}
-            {method?.kind === "cash_on_delivery" && due > 0 && <p className="text-slate-600">À régler en espèces à la livraison : {formatMRU(due)}.</p>}
+            {feePending && method?.kind === "mobile_money" && <p className="text-slate-600">Le paiement sera possible dès que les frais de livraison auront été fixés.</p>}
+            {method?.kind === "cash_on_delivery" && due > 0 && !feePending && <p className="text-slate-600">À régler en espèces à la livraison : {formatMRU(due)}.</p>}
             {payments.length > 0 && (
               <ul className="space-y-1 border-t border-slate-100 pt-2">
                 {payments.map((p) => (
